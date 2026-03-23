@@ -25,8 +25,8 @@ LINE_USER_ID = os.getenv("LINE_USER_ID", "")
 # ---------- 設定 ----------
 CONFIG = {
     "min_volume": 1_000_000,          # 最低出来高
-    "max_candidates": 10,             # 最大候補数
-    "min_score_to_notify": 55,        # 通知スコア
+    "max_candidates": 20,             # 最大候補数
+    "min_score_to_notify": 50,        # 通知スコア
     "pullback_ma_tolerance": 0.01,    # 25日線接触許容（1%）
     "max_distance_from_ma25": 6.0,    # 25日線からの乖離許容（%）
     "breakout_buffer": 0.002,         # ブレイク用に高値の少し上
