@@ -4,32 +4,42 @@ import json
 import os
 from dataclasses import dataclass, asdict
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 import yfinance as yf
 
 
 # ==============================
-# たいき専用 トレードBOT 完全版
-# 候補抽出 + 判定 + LINE通知 + エントリー自動化
+# たいき専用 トレードBOT 強化版
+# 候補抽出 + 判定 + LINE通知 + ロット管理 + RR管理
 # ==============================
 
 # ---------- LINE設定 ----------
-# 必ず自分の値に入れ替える
-LINE_CHANNEL_ACCESS_TOKEN = "H9pAb5DvQAc7PVFombicOwBeIsrmrr16TUhyLglsHVdpGXPx5Jh5RbqtTZZua2IqRd/SXFyXBWsenlhlSm59KxPDSTJ+tJ4HTGh2/+g+0OGv2xNyQhi7OWs5HglNp9rYrUVyfN23SXYb73TtdyOfGAdB04t89/1O/w1cDnyilFU="
-LINE_USER_ID = "U8c68daef32fba3b5ac4610f1693adf86"
+# GitHub Secrets に入れる:
+# LINE_CHANNEL_ACCESS_TOKEN
+# LINE_USER_ID
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+LINE_USER_ID = os.getenv("LINE_USER_ID", "")
 
 # ---------- 設定 ----------
 CONFIG = {
-    "min_volume": 1_000_000,         # 最低出来高
-    "max_candidates": 10,            # 最大候補数
-    "min_score_to_notify": 60,       # 通知スコア
-    "pullback_ma_tolerance": 0.01,   # 25日線接触許容（1%）
-    "max_distance_from_ma25": 6.0,   # 25日線からの乖離許容（%）
-    "breakout_buffer": 0.002,        # ブレイク用に高値の少し上
-    "take_profit_pct": 0.03,         # 利確目安 3%
-    "stop_buffer": 0.995,            # 損切りは直近安値の少し下
+    "min_volume": 1_000_000,          # 最低出来高
+    "max_candidates": 10,             # 最大候補数
+    "min_score_to_notify": 55,        # 通知スコア
+    "pullback_ma_tolerance": 0.01,    # 25日線接触許容（1%）
+    "max_distance_from_ma25": 6.0,    # 25日線からの乖離許容（%）
+    "breakout_buffer": 0.002,         # ブレイク用に高値の少し上
+    "take_profit_pct": 0.03,          # 押し目利確目安 3%
+    "stop_buffer": 0.995,             # 損切りは直近安値の少し下
+
+    # 資金管理
+    "account_size": 1_000_000,        # 口座資金
+    "risk_per_trade": 0.01,           # 1回の許容損失 1%
+    "max_position_ratio": 0.25,       # 1銘柄に入れる最大資金比率
+    "min_rr": 1.5,                    # 最低RR
+    "max_stop_pct": 0.05,             # 損切り幅5%超は見送り
+
     "candidate_symbols": [
         "7203.T", "6758.T", "9984.T", "8306.T", "7974.T",
         "8035.T", "9432.T", "4063.T", "6954.T", "6861.T",
@@ -59,6 +69,28 @@ def sma(values: List[float], period: int) -> List[Optional[float]]:
             window = values[i + 1 - period : i + 1]
             result.append(sum(window) / period)
     return result
+
+
+def calc_rr(entry: float, stop: float, take: float) -> float:
+    risk = entry - stop
+    reward = take - entry
+    if risk <= 0:
+        return 0.0
+    return reward / risk
+
+
+def calc_position_size(entry: float, stop: float) -> Tuple[int, float]:
+    risk_amount = CONFIG["account_size"] * CONFIG["risk_per_trade"]
+    risk_per_share = entry - stop
+
+    if risk_per_share <= 0:
+        return 0, 0.0
+
+    raw_size = risk_amount / risk_per_share
+    max_size_by_cash = (CONFIG["account_size"] * CONFIG["max_position_ratio"]) / entry
+    size = int(min(raw_size, max_size_by_cash))
+
+    return max(size, 0), risk_amount
 
 
 # ---------- データ構造 ----------
@@ -106,6 +138,13 @@ class RuleResult:
     stop_idea: str
     take_profit_idea: str
     verdict: str
+    setup_type: str = "none"           # pullback / breakout / none
+    entry_price: float = 0.0
+    stop_price: float = 0.0
+    take_profit_price: float = 0.0
+    rr: float = 0.0
+    position_size: int = 0
+    risk_amount: float = 0.0
 
 
 # ---------- 候補抽出 ----------
@@ -124,7 +163,6 @@ class MarketDataClient:
                 prev_close = float(hist["Close"].iloc[-2])
                 current_price = float(hist["Close"].iloc[-1])
                 volume = int(hist["Volume"].iloc[-1])
-
                 change_pct = safe_div((current_price - prev_close), prev_close) * 100
 
                 if volume >= CONFIG["min_volume"] and change_pct > 0:
@@ -328,27 +366,81 @@ class RuleEngine:
         else:
             negatives.append("材料ニュースは目立たない")
 
-        passed = score >= CONFIG["min_score_to_notify"]
-        if not is_pullback_ready:
-            negatives.append("押し目未完成（早めの監視候補）")
-
-        # ---------- エントリー自動化 ----------
+        # ---------- エントリー判定 ----------
         recent_high = max(highs[-5:])
         recent_low = min(lows[-5:])
 
-        break_entry = round(recent_high * (1 + CONFIG["breakout_buffer"]), 2)
-        pullback_entry = round(ma25_now, 2) if ma25_now is not None else None
-        stop_loss = round(recent_low * CONFIG["stop_buffer"], 2)
-        take_profit = round(break_entry * (1 + CONFIG["take_profit_pct"]), 2)
+        setup_type = "none"
+        entry_price = 0.0
+        stop_price = 0.0
+        take_profit_price = 0.0
 
-        entry_idea = (
-            "【エントリー】\n"
-            f"・ブレイク：{break_entry}円\n"
-            f"・押し目：{pullback_entry}円\n"
+        is_breakout_ready = (
+            latest_close > recent_high * (1 + CONFIG["breakout_buffer"])
+            and snapshot.volume >= CONFIG["min_volume"]
+            and latest_close > latest_open
         )
-        stop_idea = f"{stop_loss}円（直近安値割れ）"
-        take_profit_idea = f"{take_profit}円 or トレンド継続"
-        verdict = "監視強" if passed else "様子見"
+
+        if is_pullback_ready:
+            setup_type = "pullback"
+            entry_price = round(latest_close, 2)
+            stop_price = round(recent_low * CONFIG["stop_buffer"], 2)
+            take_profit_price = round(entry_price * (1 + CONFIG["take_profit_pct"]), 2)
+
+        elif is_breakout_ready:
+            setup_type = "breakout"
+            entry_price = round(latest_close, 2)
+            stop_price = round(recent_low * CONFIG["stop_buffer"], 2)
+            # ブレイクはRRを取りやすいよう2R目安
+            take_profit_price = round(entry_price + (entry_price - stop_price) * 2.0, 2)
+
+        else:
+            negatives.append("押し目/ブレイクの形が未完成")
+
+        # ---------- RR / ロット管理 ----------
+        rr = 0.0
+        position_size = 0
+        risk_amount = 0.0
+
+        if entry_price > 0 and stop_price > 0 and take_profit_price > 0:
+            stop_pct = safe_div((entry_price - stop_price), entry_price)
+
+            if stop_pct <= CONFIG["max_stop_pct"]:
+                rr = calc_rr(entry_price, stop_price, take_profit_price)
+                position_size, risk_amount = calc_position_size(entry_price, stop_price)
+            else:
+                negatives.append(f"損切り幅が大きすぎる ({stop_pct * 100:.2f}%)")
+
+        if setup_type != "none" and rr < CONFIG["min_rr"]:
+            negatives.append(f"RR不足 ({rr:.2f})")
+
+        if setup_type != "none" and position_size <= 0:
+            negatives.append("適正ロットを計算できない")
+
+        passed = (
+            score >= CONFIG["min_score_to_notify"]
+            and setup_type in ["pullback", "breakout"]
+            and rr >= CONFIG["min_rr"]
+            and position_size > 0
+        )
+
+        if setup_type == "pullback":
+            entry_idea = f"押し目候補 / {entry_price:.2f}円付近"
+            stop_idea = f"{stop_price:.2f}円割れで損切り"
+            take_profit_idea = f"{take_profit_price:.2f}円付近で利確候補"
+            verdict = "押し目監視"
+
+        elif setup_type == "breakout":
+            entry_idea = f"ブレイク候補 / {entry_price:.2f}円付近"
+            stop_idea = f"{stop_price:.2f}円割れで損切り"
+            take_profit_idea = f"{take_profit_price:.2f}円付近で利確候補"
+            verdict = "ブレイク監視"
+
+        else:
+            entry_idea = "見送り"
+            stop_idea = "見送り"
+            take_profit_idea = "見送り"
+            verdict = "様子見"
 
         return RuleResult(
             symbol=snapshot.symbol,
@@ -360,28 +452,40 @@ class RuleEngine:
             stop_idea=stop_idea,
             take_profit_idea=take_profit_idea,
             verdict=verdict,
+            setup_type=setup_type,
+            entry_price=entry_price,
+            stop_price=stop_price,
+            take_profit_price=take_profit_price,
+            rr=rr,
+            position_size=position_size,
+            risk_amount=risk_amount,
         )
 
 
 # ---------- レポート整形 ----------
 class ReportFormatter:
     def format_line_message(self, snapshot: SymbolSnapshot, result: RuleResult) -> str:
-        positives = "\n".join([f"・{x}" for x in result.reasons_positive]) if result.reasons_positive else "・なし"
-        negatives = "\n".join([f"・{x}" for x in result.reasons_negative]) if result.reasons_negative else "・なし"
+        positives = "\n".join([f"・{x}" for x in result.reasons_positive[:5]]) if result.reasons_positive else "・なし"
+        negatives = "\n".join([f"・{x}" for x in result.reasons_negative[:5]]) if result.reasons_negative else "・なし"
 
         return (
             f"【トレードBOT通知】\n"
             f"銘柄: {snapshot.symbol} / {snapshot.name}\n"
-            f"現在値: {snapshot.current_price:.2f} 円\n"
+            f"現在値: {snapshot.current_price:.2f}円\n"
             f"前日比: {snapshot.price_change_pct:.2f}%\n"
-            f"出来高: {snapshot.volume:,} 株\n"
+            f"出来高: {snapshot.volume:,}株\n\n"
             f"スコア: {result.score}\n"
+            f"型: {result.setup_type}\n"
             f"判定: {result.verdict}\n\n"
+            f"■売買プラン\n"
+            f"エントリー: {result.entry_price:.2f}円\n"
+            f"損切り: {result.stop_price:.2f}円\n"
+            f"利確: {result.take_profit_price:.2f}円\n"
+            f"RR: {result.rr:.2f}\n"
+            f"ロット: {result.position_size}株\n"
+            f"許容損失: {result.risk_amount:.0f}円\n\n"
             f"■プラス材料\n{positives}\n\n"
-            f"■マイナス材料\n{negatives}\n\n"
-            f"■エントリー案\n{result.entry_idea}\n"
-            f"■損切り案\n{result.stop_idea}\n"
-            f"■利確案\n{result.take_profit_idea}"
+            f"■注意点\n{negatives}"
         )
 
     def format_log_json(self, snapshot: SymbolSnapshot, result: RuleResult) -> Dict[str, Any]:
@@ -409,12 +513,7 @@ class LineNotifier:
         self.user_id = user_id
 
     def send_text(self, text: str) -> None:
-        if (
-            not self.channel_access_token
-            or not self.user_id
-            or "YOUR_LINE_CHANNEL_ACCESS_TOKEN" in self.channel_access_token
-            or "YOUR_LINE_USER_ID" in self.user_id
-        ):
+        if not self.channel_access_token or not self.user_id:
             log("LINE設定未入力のため、通知をスキップ")
             print("\n===== LINE送信プレビュー =====")
             print(text)
@@ -429,6 +528,7 @@ class LineNotifier:
             "to": self.user_id,
             "messages": [{"type": "text", "text": text[:5000]}],
         }
+
         response = requests.post(self.PUSH_URL, headers=headers, json=body, timeout=20)
         response.raise_for_status()
         log("LINE通知送信完了")
@@ -463,7 +563,6 @@ class TradeBot:
 
     def build_snapshot(self, item: Dict[str, Any]) -> SymbolSnapshot:
         symbol = item["symbol"]
-
         real = get_stock_snapshot(symbol)
         if real is None:
             raise ValueError(f"価格取得失敗: {symbol}")
@@ -500,8 +599,8 @@ class TradeBot:
             try:
                 snapshot = self.build_snapshot(item)
                 result = self.rule_engine.evaluate(snapshot)
-                payload = self.formatter.format_log_json(snapshot, result)
 
+                payload = self.formatter.format_log_json(snapshot, result)
                 saved_path = self.storage.save_result(snapshot.symbol, payload)
                 log(f"保存: {saved_path}")
 
@@ -509,22 +608,24 @@ class TradeBot:
                     message = self.formatter.format_line_message(snapshot, result)
                     self.notifier.send_text(message)
                     notify_count += 1
-
                     log(
-                        f"\n通知送信: {snapshot.symbol}\n"
-                        f"score: {result.score}\n"
-                        f"entry:\n{result.entry_idea}\n"
-                        f"stop: {result.stop_idea}\n"
-                        f"take: {result.take_profit_idea}\n"
-                        f"+ {result.reasons_positive}\n"
-                        f"- {result.reasons_negative}\n"
+                        f"通知送信: {snapshot.symbol} / "
+                        f"score={result.score} / "
+                        f"setup={result.setup_type} / "
+                        f"entry={result.entry_price:.2f} / "
+                        f"stop={result.stop_price:.2f} / "
+                        f"take={result.take_profit_price:.2f} / "
+                        f"rr={result.rr:.2f} / "
+                        f"size={result.position_size}"
                     )
                 else:
                     log(
-                        f"\n通知見送り: {snapshot.symbol}\n"
-                        f"score: {result.score}\n"
-                        f"+ {result.reasons_positive}\n"
-                        f"- {result.reasons_negative}\n"
+                        f"通知見送り: {snapshot.symbol} / "
+                        f"score={result.score} / "
+                        f"setup={result.setup_type} / "
+                        f"rr={result.rr:.2f} / "
+                        f"size={result.position_size} / "
+                        f"negatives={result.reasons_negative}"
                     )
 
             except Exception as e:
