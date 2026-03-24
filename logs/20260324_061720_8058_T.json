@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-03-24T06:17:20.281434",
+  "snapshot": {
+    "symbol": "8058.T",
+    "name": "8058.T",
+    "current_price": 5429.0,
+    "prev_close": 5272.0,
+    "volume": 8229300,
+    "price_change_pct": 2.9779969650986344,
+    "news_count": 0
+  },
+  "rule_result": {
+    "symbol": "8058.T",
+    "passed": false,
+    "score": 80,
+    "reasons_positive": [
+      "出来高が基準以上 (8,229,300株)",
+      "前日比プラス (2.98%)",
+      "株価が25日線の上",
+      "25日線が上向き",
+      "25日線からの乖離が適正 (5.10%)",
+      "直近で買い戻しが入っている"
+    ],
+    "reasons_negative": [
+      "トレンドが少し荒い",
+      "当日が陰線",
+      "押し目反発がまだ弱い",
+      "材料ニュースは目立たない",
+      "押し目/ブレイクの形が未完成"
+    ],
+    "entry_idea": "見送り",
+    "stop_idea": "見送り",
+    "take_profit_idea": "見送り",
+    "verdict": "様子見",
+    "setup_type": "none",
+    "entry_price": 0.0,
+    "stop_price": 0.0,
+    "take_profit_price": 0.0,
+    "rr": 0.0,
+    "position_size": 0,
+    "risk_amount": 0.0
+  }
+}

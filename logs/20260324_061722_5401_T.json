@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-03-24T06:17:22.311593",
+  "snapshot": {
+    "symbol": "5401.T",
+    "name": "5401.T",
+    "current_price": 589.9000244140625,
+    "prev_close": 584.5999755859375,
+    "volume": 17821600,
+    "price_change_pct": 0.9066111955979514,
+    "news_count": 0
+  },
+  "rule_result": {
+    "symbol": "5401.T",
+    "passed": false,
+    "score": 45,
+    "reasons_positive": [
+      "出来高が基準以上 (17,821,600株)",
+      "前日比プラス (0.91%)",
+      "直近で買い戻しが入っている"
+    ],
+    "reasons_negative": [
+      "株価が25日線より弱い",
+      "25日線の勢いが弱い",
+      "トレンドが少し荒い",
+      "25日線より下なので押し目候補ではない (-5.21%)",
+      "当日が陰線",
+      "押し目反発がまだ弱い",
+      "材料ニュースは目立たない",
+      "押し目/ブレイクの形が未完成"
+    ],
+    "entry_idea": "見送り",
+    "stop_idea": "見送り",
+    "take_profit_idea": "見送り",
+    "verdict": "様子見",
+    "setup_type": "none",
+    "entry_price": 0.0,
+    "stop_price": 0.0,
+    "take_profit_price": 0.0,
+    "rr": 0.0,
+    "position_size": 0,
+    "risk_amount": 0.0
+  }
+}
