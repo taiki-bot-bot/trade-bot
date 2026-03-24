@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-03-24T05:16:36.711665",
+  "snapshot": {
+    "symbol": "6954.T",
+    "name": "6954.T",
+    "current_price": 5695.0,
+    "prev_close": 5651.0,
+    "volume": 2054700,
+    "price_change_pct": 0.7786232525216776,
+    "news_count": 0
+  },
+  "rule_result": {
+    "symbol": "6954.T",
+    "passed": false,
+    "score": 45,
+    "reasons_positive": [
+      "出来高が基準以上 (2,054,700株)",
+      "前日比プラス (0.78%)",
+      "直近で買い戻しが入っている"
+    ],
+    "reasons_negative": [
+      "株価が25日線より弱い",
+      "25日線の勢いが弱い",
+      "トレンドが少し荒い",
+      "25日線より下なので押し目候補ではない (-10.03%)",
+      "当日が陰線",
+      "押し目反発がまだ弱い",
+      "材料ニュースは目立たない",
+      "押し目/ブレイクの形が未完成"
+    ],
+    "entry_idea": "見送り",
+    "stop_idea": "見送り",
+    "take_profit_idea": "見送り",
+    "verdict": "様子見",
+    "setup_type": "none",
+    "entry_price": 0.0,
+    "stop_price": 0.0,
+    "take_profit_price": 0.0,
+    "rr": 0.0,
+    "position_size": 0,
+    "risk_amount": 0.0
+  }
+}
