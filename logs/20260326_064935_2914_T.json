@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-03-26T06:49:35.842680",
+  "snapshot": {
+    "symbol": "2914.T",
+    "name": "2914.T",
+    "current_price": 5983.0,
+    "prev_close": 5950.0,
+    "volume": 3133600,
+    "price_change_pct": 0.5546218487394958,
+    "news_count": 0
+  },
+  "rule_result": {
+    "symbol": "2914.T",
+    "passed": false,
+    "score": 105,
+    "reasons_positive": [
+      "出来高が基準以上 (3,133,600株)",
+      "前日比プラス (0.55%)",
+      "株価が25日線の上",
+      "25日線が上向き",
+      "直近で高値・安値の切り上げ傾向",
+      "25日線からの乖離が適正 (2.28%)",
+      "当日が陽線",
+      "直近で買い戻しが入っている"
+    ],
+    "reasons_negative": [
+      "押し目反発がまだ弱い",
+      "材料ニュースは目立たない",
+      "押し目/ブレイクの形が未完成"
+    ],
+    "entry_idea": "見送り",
+    "stop_idea": "見送り",
+    "take_profit_idea": "見送り",
+    "verdict": "様子見",
+    "setup_type": "none",
+    "entry_price": 0.0,
+    "stop_price": 0.0,
+    "take_profit_price": 0.0,
+    "rr": 0.0,
+    "position_size": 0,
+    "risk_amount": 0.0
+  }
+}

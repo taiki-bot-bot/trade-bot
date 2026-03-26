@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-03-26T06:49:35.540343",
+  "snapshot": {
+    "symbol": "9432.T",
+    "name": "9432.T",
+    "current_price": 158.8000030517578,
+    "prev_close": 157.5,
+    "volume": 162521000,
+    "price_change_pct": 0.8253987630208333,
+    "news_count": 0
+  },
+  "rule_result": {
+    "symbol": "9432.T",
+    "passed": false,
+    "score": 90,
+    "reasons_positive": [
+      "出来高が基準以上 (162,521,000株)",
+      "前日比プラス (0.83%)",
+      "株価が25日線の上",
+      "25日線が上向き",
+      "25日線からの乖離が適正 (3.02%)",
+      "当日が陽線",
+      "直近で買い戻しが入っている"
+    ],
+    "reasons_negative": [
+      "トレンドが少し荒い",
+      "押し目反発がまだ弱い",
+      "材料ニュースは目立たない",
+      "押し目/ブレイクの形が未完成"
+    ],
+    "entry_idea": "見送り",
+    "stop_idea": "見送り",
+    "take_profit_idea": "見送り",
+    "verdict": "様子見",
+    "setup_type": "none",
+    "entry_price": 0.0,
+    "stop_price": 0.0,
+    "take_profit_price": 0.0,
+    "rr": 0.0,
+    "position_size": 0,
+    "risk_amount": 0.0
+  }
+}
