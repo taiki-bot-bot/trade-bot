@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-03-27T05:52:33.398023",
+  "snapshot": {
+    "symbol": "7974.T",
+    "name": "7974.T",
+    "current_price": 9253.0,
+    "prev_close": 8990.0,
+    "volume": 6337000,
+    "price_change_pct": 2.9254727474972193,
+    "news_count": 0
+  },
+  "rule_result": {
+    "symbol": "7974.T",
+    "passed": false,
+    "score": 110,
+    "reasons_positive": [
+      "出来高が基準以上 (6,337,000株)",
+      "前日比プラス (2.93%)",
+      "株価が25日線の上",
+      "25日線が上向き",
+      "25日線からの乖離が適正 (1.25%)",
+      "当日が陽線",
+      "押し目からの反発確認（エントリー候補）",
+      "直近で買い戻しが入っている"
+    ],
+    "reasons_negative": [
+      "トレンドが少し荒い",
+      "材料ニュースは目立たない",
+      "RR不足 (0.60)"
+    ],
+    "entry_idea": "押し目候補 / 9253.00円付近",
+    "stop_idea": "8790.83円割れで損切り",
+    "take_profit_idea": "9530.59円付近で利確候補",
+    "verdict": "押し目監視",
+    "setup_type": "pullback",
+    "entry_price": 9253.0,
+    "stop_price": 8790.83,
+    "take_profit_price": 9530.59,
+    "rr": 0.6006231473267415,
+    "position_size": 21,
+    "risk_amount": 10000.0
+  }
+}
