@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-03-27T06:49:42.160550",
+  "snapshot": {
+    "symbol": "9104.T",
+    "name": "9104.T",
+    "current_price": 7022.0,
+    "prev_close": 6862.0,
+    "volume": 6052600,
+    "price_change_pct": 2.3316817254444766,
+    "news_count": 0
+  },
+  "rule_result": {
+    "symbol": "9104.T",
+    "passed": false,
+    "score": 95,
+    "reasons_positive": [
+      "出来高が基準以上 (6,052,600株)",
+      "前日比プラス (2.33%)",
+      "株価が25日線の上",
+      "25日線が上向き",
+      "直近で高値・安値の切り上げ傾向",
+      "当日が陽線",
+      "直近で買い戻しが入っている"
+    ],
+    "reasons_negative": [
+      "25日線から離れすぎ (14.51%)",
+      "押し目反発がまだ弱い",
+      "材料ニュースは目立たない",
+      "押し目/ブレイクの形が未完成"
+    ],
+    "entry_idea": "見送り",
+    "stop_idea": "見送り",
+    "take_profit_idea": "見送り",
+    "verdict": "様子見",
+    "setup_type": "none",
+    "entry_price": 0.0,
+    "stop_price": 0.0,
+    "take_profit_price": 0.0,
+    "rr": 0.0,
+    "position_size": 0,
+    "risk_amount": 0.0
+  }
+}
