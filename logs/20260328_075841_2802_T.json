@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-03-28T07:58:41.001499",
+  "snapshot": {
+    "symbol": "2802.T",
+    "name": "2802.T",
+    "current_price": 4530.0,
+    "prev_close": 4514.0,
+    "volume": 4050900,
+    "price_change_pct": 0.35445281346920693,
+    "news_count": 0
+  },
+  "rule_result": {
+    "symbol": "2802.T",
+    "passed": false,
+    "score": 70,
+    "reasons_positive": [
+      "出来高が基準以上 (4,050,900株)",
+      "前日比プラス (0.35%)",
+      "直近で高値・安値の切り上げ傾向",
+      "当日が陽線",
+      "直近で買い戻しが入っている"
+    ],
+    "reasons_negative": [
+      "株価が25日線より弱い",
+      "25日線の勢いが弱い",
+      "25日線より下なので押し目候補ではない (-0.50%)",
+      "押し目反発がまだ弱い",
+      "材料ニュースは目立たない",
+      "押し目/ブレイクの形が未完成"
+    ],
+    "entry_idea": "見送り",
+    "stop_idea": "見送り",
+    "take_profit_idea": "見送り",
+    "verdict": "様子見",
+    "setup_type": "none",
+    "entry_price": 0.0,
+    "stop_price": 0.0,
+    "take_profit_price": 0.0,
+    "rr": 0.0,
+    "position_size": 0,
+    "risk_amount": 0.0
+  }
+}
