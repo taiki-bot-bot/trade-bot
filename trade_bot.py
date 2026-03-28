@@ -13,6 +13,7 @@ import yfinance as yf
 # ==============================
 # たいき専用 トレードBOT 強化版
 # 候補抽出 + 判定 + LINE通知 + ロット管理 + RR管理
+# + 15:50 事前シナリオ通知
 # ==============================
 
 # ---------- LINE設定 ----------
@@ -22,10 +23,47 @@ import yfinance as yf
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_USER_ID = os.getenv("LINE_USER_ID", "")
 
+# ---------- 実行モード ----------
+RUN_MODE = os.getenv("RUN_MODE", "trade").lower()  # trade / prescenario
+
+# ---------- 銘柄名 ----------
+SYMBOL_NAME_MAP = {
+    "7203.T": "トヨタ",
+    "6758.T": "ソニー",
+    "9984.T": "ソフトバンクG",
+    "8306.T": "三菱UFJ",
+    "7974.T": "任天堂",
+    "8035.T": "東京エレクトロン",
+    "9432.T": "NTT",
+    "4063.T": "信越化学",
+    "6954.T": "ファナック",
+    "6861.T": "キーエンス",
+    "6501.T": "日立",
+    "4578.T": "大塚HD",
+    "5401.T": "日本製鉄",
+    "9101.T": "日本郵船",
+    "9104.T": "商船三井",
+    "9501.T": "東京電力",
+    "4755.T": "楽天グループ",
+    "7201.T": "日産",
+    "7733.T": "オリンパス",
+    "2802.T": "味の素",
+    "9983.T": "ファストリ",
+    "7267.T": "ホンダ",
+    "7011.T": "三菱重工",
+    "8058.T": "三菱商事",
+    "2914.T": "JT",
+    "6762.T": "TDK",
+    "6098.T": "リクルート",
+    "4385.T": "メルカリ",
+    "2413.T": "エムスリー",
+    "1570.T": "日経レバ",
+}
+
 # ---------- 設定 ----------
 CONFIG = {
     "min_volume": 1_000_000,          # 最低出来高
-    "max_candidates": 20,             # 最大候補数
+    "max_candidates": 30,             # 最大候補数
     "min_score_to_notify": 50,        # 通知スコア
     "pullback_ma_tolerance": 0.01,    # 25日線接触許容（1%）
     "max_distance_from_ma25": 6.0,    # 25日線からの乖離許容（%）
@@ -40,45 +78,41 @@ CONFIG = {
     "min_rr": 1.5,                    # 最低RR
     "max_stop_pct": 0.05,             # 損切り幅5%超は見送り
 
+    # 事前シナリオ
+    "prescenario_top_n": 5,
+
     "candidate_symbols": [
-    "7203.T",  # トヨタ
-    "6758.T",  # ソニー
-    "9984.T",  # ソフトバンクG
-    "8306.T",  # 三菱UFJ
-    "7974.T",  # 任天堂
-
-    "8035.T",  # 東京エレクトロン
-    "9432.T",  # NTT
-    "4063.T",  # 信越化学
-    "6954.T",  # ファナック
-    "6861.T",  # キーエンス
-
-    "6501.T",  # 日立
-    "4578.T",  # 大塚HD
-    "5401.T",  # 日本製鉄
-    "9101.T",  # 日本郵船
-    "9104.T",  # 商船三井
-
-    "9501.T",  # 東京電力
-    "4755.T",  # 楽天グループ
-    "7201.T",  # 日産
-    "7733.T",  # オリンパス
-    "2802.T",  # 味の素
-
-    "9983.T",  # ファストリ
-    "7267.T",  # ホンダ
-    "7011.T",  # 三菱重工
-    "8058.T",  # 三菱商事
-    "2914.T",  # JT
-
-    # 追加分
-    "6762.T",  # TDK
-    "6098.T",  # リクルート
-    "4385.T",  # メルカリ
-    "2413.T",  # エムスリー
-    "1570.T",  # 日経レバ
-],
-   
+        "7203.T",  # トヨタ
+        "6758.T",  # ソニー
+        "9984.T",  # ソフトバンクG
+        "8306.T",  # 三菱UFJ
+        "7974.T",  # 任天堂
+        "8035.T",  # 東京エレクトロン
+        "9432.T",  # NTT
+        "4063.T",  # 信越化学
+        "6954.T",  # ファナック
+        "6861.T",  # キーエンス
+        "6501.T",  # 日立
+        "4578.T",  # 大塚HD
+        "5401.T",  # 日本製鉄
+        "9101.T",  # 日本郵船
+        "9104.T",  # 商船三井
+        "9501.T",  # 東京電力
+        "4755.T",  # 楽天グループ
+        "7201.T",  # 日産
+        "7733.T",  # オリンパス
+        "2802.T",  # 味の素
+        "9983.T",  # ファストリ
+        "7267.T",  # ホンダ
+        "7011.T",  # 三菱重工
+        "8058.T",  # 三菱商事
+        "2914.T",  # JT
+        "6762.T",  # TDK
+        "6098.T",  # リクルート
+        "4385.T",  # メルカリ
+        "2413.T",  # エムスリー
+        "1570.T",  # 日経レバ
+    ],
 }
 
 
@@ -98,7 +132,7 @@ def sma(values: List[float], period: int) -> List[Optional[float]]:
         if i + 1 < period:
             result.append(None)
         else:
-            window = values[i + 1 - period : i + 1]
+            window = values[i + 1 - period: i + 1]
             result.append(sum(window) / period)
     return result
 
@@ -123,6 +157,47 @@ def calc_position_size(entry: float, stop: float) -> Tuple[int, float]:
     size = int(min(raw_size, max_size_by_cash))
 
     return max(size, 0), risk_amount
+
+
+def pick_recent_high_low_from_bars(bars: List["PriceBar"], lookback: int = 10) -> Tuple[float, float]:
+    recent = bars[-lookback:] if len(bars) >= lookback else bars
+    highs = [b.high for b in recent]
+    lows = [b.low for b in recent]
+    return max(highs), min(lows)
+
+
+def calc_dynamic_score_from_snapshot(snapshot: "SymbolSnapshot") -> float:
+    closes = [b.close for b in snapshot.bars]
+    highs = [b.high for b in snapshot.bars]
+    lows = [b.low for b in snapshot.bars]
+    volumes = [b.volume for b in snapshot.bars]
+
+    if len(closes) < 75 or len(volumes) < 20:
+        return 0.0
+
+    sma25 = sma(closes, 25)[-1]
+    sma75 = sma(closes, 75)[-1]
+    close = closes[-1]
+    high = highs[-1]
+    low = lows[-1]
+    volume = volumes[-1]
+    avg_volume20 = sum(volumes[-20:]) / 20
+
+    volume_score = safe_div(volume, avg_volume20)
+    range_pct = safe_div((high - low), close)
+
+    trend_score = 0
+    if sma25 is not None and close > sma25:
+        trend_score += 1
+    if sma25 is not None and sma75 is not None and sma25 > sma75:
+        trend_score += 1
+
+    dynamic_score = (
+        volume_score * 0.4 +
+        range_pct * 20 * 0.3 +
+        trend_score * 0.3
+    )
+    return round(dynamic_score, 2)
 
 
 # ---------- データ構造 ----------
@@ -179,6 +254,24 @@ class RuleResult:
     risk_amount: float = 0.0
 
 
+@dataclass
+class PreScenario:
+    symbol: str
+    name: str
+    status: str
+    scenario_type: str
+    recent_high: float
+    recent_low: float
+    sma25: float
+    sma75: float
+    entry_condition: str
+    invalid_condition: str
+    comment: str
+    dynamic_score: float
+    volume_ratio: float
+    range_pct: float
+
+
 # ---------- 候補抽出 ----------
 class MarketDataClient:
     def get_top_movers(self) -> List[Dict[str, Any]]:
@@ -201,7 +294,7 @@ class MarketDataClient:
                     data.append(
                         {
                             "symbol": symbol,
-                            "name": symbol,
+                            "name": SYMBOL_NAME_MAP.get(symbol, symbol),
                             "change_pct": change_pct,
                             "volume": volume,
                         }
@@ -210,14 +303,19 @@ class MarketDataClient:
                 log(f"候補取得スキップ: {symbol} / {e}")
 
         data.sort(key=lambda x: x["change_pct"], reverse=True)
-        top = data[: CONFIG["max_candidates"]]
+        top = data[:CONFIG["max_candidates"]]
         return [{"symbol": x["symbol"], "name": x["name"]} for x in top]
+
+    def get_all_candidates(self) -> List[Dict[str, Any]]:
+        return [
+            {"symbol": symbol, "name": SYMBOL_NAME_MAP.get(symbol, symbol)}
+            for symbol in CONFIG["candidate_symbols"]
+        ]
 
 
 # ---------- ニュース ----------
 class NewsClient:
     def get_news_for_symbol(self, symbol: str) -> List[NewsItem]:
-        # 今はダミー
         return []
 
 
@@ -297,35 +395,30 @@ class RuleEngine:
         positives: List[str] = []
         negatives: List[str] = []
 
-        # 1. 出来高
         if snapshot.volume >= CONFIG["min_volume"]:
             score += 20
             positives.append(f"出来高が基準以上 ({snapshot.volume:,}株)")
         else:
             negatives.append(f"出来高不足 ({snapshot.volume:,}株)")
 
-        # 2. 前日比
         if snapshot.price_change_pct > 0:
             score += 15
             positives.append(f"前日比プラス ({snapshot.price_change_pct:.2f}%)")
         else:
             negatives.append(f"前日比マイナス ({snapshot.price_change_pct:.2f}%)")
 
-        # 3. 株価が25日線の上
         if ma25_now is not None and latest_close > ma25_now:
             score += 15
             positives.append("株価が25日線の上")
         else:
             negatives.append("株価が25日線より弱い")
 
-        # 4. 25日線の向き
         if ma25_now is not None and ma25_prev is not None and ma25_now > ma25_prev:
             score += 10
             positives.append("25日線が上向き")
         else:
             negatives.append("25日線の勢いが弱い")
 
-        # 5. 高値・安値切り上げ
         if len(highs) >= 5 and len(lows) >= 5:
             recent_highs = highs[-5:]
             recent_lows = lows[-5:]
@@ -340,7 +433,6 @@ class RuleEngine:
         else:
             negatives.append("直近トレンド判定用データ不足")
 
-        # 6. 25日線からの距離
         distance_to_ma25 = None
         if ma25_now is not None:
             distance_to_ma25 = safe_div((latest_close - ma25_now), ma25_now) * 100
@@ -357,7 +449,6 @@ class RuleEngine:
         else:
             negatives.append("25日線が計算できない")
 
-        # 7. 陽線
         is_bullish_candle = latest_close > latest_open
         if is_bullish_candle:
             score += 10
@@ -365,7 +456,6 @@ class RuleEngine:
         else:
             negatives.append("当日が陰線")
 
-        # 8. 押し目反発
         is_pullback_ready = False
         if ma25_now is not None:
             touched_ma25 = latest_low <= ma25_now * (1 + CONFIG["pullback_ma_tolerance"])
@@ -381,14 +471,12 @@ class RuleEngine:
         else:
             negatives.append("押し目判定不可")
 
-        # 9. 直近戻し
         if len(closes) >= 2 and closes[-1] > closes[-2]:
             score += 10
             positives.append("直近で買い戻しが入っている")
         else:
             negatives.append("直近の戻しが弱い")
 
-        # 10. ニュース
         if snapshot.news:
             positive_news_count = sum(1 for n in snapshot.news if n.sentiment == "positive")
             high_impact_count = sum(1 for n in snapshot.news if n.impact == "high")
@@ -398,7 +486,6 @@ class RuleEngine:
         else:
             negatives.append("材料ニュースは目立たない")
 
-        # ---------- エントリー判定 ----------
         recent_high = max(highs[-5:])
         recent_low = min(lows[-5:])
 
@@ -423,13 +510,11 @@ class RuleEngine:
             setup_type = "breakout"
             entry_price = round(latest_close, 2)
             stop_price = round(recent_low * CONFIG["stop_buffer"], 2)
-            # ブレイクはRRを取りやすいよう2R目安
             take_profit_price = round(entry_price + (entry_price - stop_price) * 2.0, 2)
 
         else:
             negatives.append("押し目/ブレイクの形が未完成")
 
-        # ---------- RR / ロット管理 ----------
         rr = 0.0
         position_size = 0
         risk_amount = 0.0
@@ -494,6 +579,88 @@ class RuleEngine:
         )
 
 
+# ---------- 事前シナリオ ----------
+class PreScenarioEngine:
+    def evaluate(self, snapshot: SymbolSnapshot) -> Optional[PreScenario]:
+        closes = [b.close for b in snapshot.bars]
+        highs = [b.high for b in snapshot.bars]
+        lows = [b.low for b in snapshot.bars]
+        opens = [b.open for b in snapshot.bars]
+        volumes = [b.volume for b in snapshot.bars]
+
+        if len(closes) < 80:
+            return None
+
+        ma25_list = sma(closes, 25)
+        ma75_list = sma(closes, 75)
+        sma25_now = ma25_list[-1]
+        sma75_now = ma75_list[-1]
+
+        if sma25_now is None or sma75_now is None:
+            return None
+
+        close = closes[-1]
+        open_ = opens[-1]
+        high = highs[-1]
+        low = lows[-1]
+        volume = volumes[-1]
+        avg_volume20 = sum(volumes[-20:]) / 20
+
+        recent_high, recent_low = pick_recent_high_low_from_bars(snapshot.bars, lookback=10)
+
+        dynamic_score = calc_dynamic_score_from_snapshot(snapshot)
+        volume_ratio = round(safe_div(volume, avg_volume20), 2)
+        range_pct = round(safe_div((high - low), close) * 100, 2)
+
+        is_uptrend = (close > sma25_now) and (sma25_now > sma75_now)
+        near_recent_high = close >= recent_high * 0.985
+        near_sma25 = abs(close - sma25_now) / close <= 0.02
+        weak_trend = close < sma25_now
+        bullish_today = close > open_
+
+        if is_uptrend and near_sma25 and bullish_today:
+            scenario_type = "押し目待ち"
+            status = "上昇トレンド継続"
+            entry_condition = f"{round(sma25_now, 1)}付近で反発陽線"
+            invalid_condition = f"{round(recent_low, 1)}割れ"
+            comment = "形は強い。高値追いせず、押して止まるのを待つ"
+        elif is_uptrend and near_recent_high:
+            scenario_type = "ブレイク待ち"
+            status = "高値圏で強い持ち合い"
+            entry_condition = f"{round(recent_high, 1)}上抜け＋出来高増"
+            invalid_condition = f"{round(recent_low, 1)}割れ"
+            comment = "抜けたら強い。抜けない間は待機"
+        elif weak_trend:
+            scenario_type = "見送り"
+            status = "トレンド弱め"
+            entry_condition = "まだ弱いので待機"
+            invalid_condition = f"{round(recent_low, 1)}付近は要注意"
+            comment = "優先度低め。無理に触らない"
+        else:
+            scenario_type = "様子見"
+            status = "中立"
+            entry_condition = f"{round(recent_high, 1)}上抜け or {round(sma25_now, 1)}反発待ち"
+            invalid_condition = f"{round(recent_low, 1)}割れ"
+            comment = "方向感が固まるまで待つ"
+
+        return PreScenario(
+            symbol=snapshot.symbol,
+            name=snapshot.name,
+            status=status,
+            scenario_type=scenario_type,
+            recent_high=round(recent_high, 1),
+            recent_low=round(recent_low, 1),
+            sma25=round(sma25_now, 1),
+            sma75=round(sma75_now, 1),
+            entry_condition=entry_condition,
+            invalid_condition=invalid_condition,
+            comment=comment,
+            dynamic_score=dynamic_score,
+            volume_ratio=volume_ratio,
+            range_pct=range_pct,
+        )
+
+
 # ---------- レポート整形 ----------
 class ReportFormatter:
     def format_line_message(self, snapshot: SymbolSnapshot, result: RuleResult) -> str:
@@ -519,6 +686,37 @@ class ReportFormatter:
             f"■プラス材料\n{positives}\n\n"
             f"■注意点\n{negatives}"
         )
+
+    def format_pre_scenario_message(self, scenarios: List[PreScenario], top_n: int = 5) -> str:
+        if not scenarios:
+            return "【本日の事前シナリオ】\n該当なし"
+
+        sorted_scenarios = sorted(
+            scenarios,
+            key=lambda x: x.dynamic_score,
+            reverse=True
+        )[:top_n]
+
+        lines: List[str] = []
+        lines.append(f"【本日の事前シナリオ TOP{len(sorted_scenarios)}】")
+        lines.append("")
+
+        for i, s in enumerate(sorted_scenarios, start=1):
+            lines.append(f"{i}. {s.symbol} {s.name}")
+            lines.append(f"状況：{s.status}")
+            lines.append(f"シナリオ：{s.scenario_type}")
+            lines.append(
+                f"監視ポイント：高値 {s.recent_high} / 安値 {s.recent_low} / 25日線 {s.sma25}"
+            )
+            lines.append(f"エントリー条件：{s.entry_condition}")
+            lines.append(f"無効条件：{s.invalid_condition}")
+            lines.append(
+                f"動きやすさ：{s.dynamic_score}  出来高倍率：{s.volume_ratio}  値幅%：{s.range_pct}"
+            )
+            lines.append(f"ひとこと：{s.comment}")
+            lines.append("")
+
+        return "\n".join(lines)
 
     def format_log_json(self, snapshot: SymbolSnapshot, result: RuleResult) -> Dict[str, Any]:
         return {
@@ -586,6 +784,7 @@ class TradeBot:
         self.market_client = MarketDataClient()
         self.news_client = NewsClient()
         self.rule_engine = RuleEngine()
+        self.pre_scenario_engine = PreScenarioEngine()
         self.formatter = ReportFormatter()
         self.notifier = LineNotifier(
             channel_access_token=LINE_CHANNEL_ACCESS_TOKEN,
@@ -620,14 +819,14 @@ class TradeBot:
             news=news,
         )
 
-    def run_once(self) -> None:
-        log("BOT開始")
+    def run_trade_mode(self) -> None:
+        log("BOT開始: trade mode")
         universe = self.market_client.get_top_movers()
         log(f"候補数: {len(universe)}")
 
         notify_count = 0
 
-        for item in universe[: CONFIG["max_candidates"]]:
+        for item in universe[:CONFIG["max_candidates"]]:
             try:
                 snapshot = self.build_snapshot(item)
                 result = self.rule_engine.evaluate(snapshot)
@@ -664,6 +863,41 @@ class TradeBot:
                 log(f"エラー: {item.get('symbol', 'UNKNOWN')} / {e}")
 
         log(f"BOT終了 / 通知数: {notify_count}")
+
+    def run_pre_scenario_mode(self) -> None:
+        log("BOT開始: prescenario mode")
+        universe = self.market_client.get_all_candidates()
+        log(f"候補数: {len(universe)}")
+
+        scenarios: List[PreScenario] = []
+
+        for item in universe:
+            try:
+                snapshot = self.build_snapshot(item)
+                scenario = self.pre_scenario_engine.evaluate(snapshot)
+                if scenario is not None:
+                    scenarios.append(scenario)
+                    log(
+                        f"シナリオ生成: {snapshot.symbol} / "
+                        f"type={scenario.scenario_type} / "
+                        f"dynamic_score={scenario.dynamic_score}"
+                    )
+            except Exception as e:
+                log(f"シナリオ生成エラー: {item.get('symbol', 'UNKNOWN')} / {e}")
+
+        message = self.formatter.format_pre_scenario_message(
+            scenarios,
+            top_n=CONFIG["prescenario_top_n"]
+        )
+        self.notifier.send_text(message)
+        log("事前シナリオ通知送信完了")
+        log("BOT終了: prescenario mode")
+
+    def run_once(self) -> None:
+        if RUN_MODE == "prescenario":
+            self.run_pre_scenario_mode()
+        else:
+            self.run_trade_mode()
 
 
 # ---------- 実行 ----------
