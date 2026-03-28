@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-03-28T09:37:20.993670",
+  "snapshot": {
+    "symbol": "9984.T",
+    "name": "9984.T",
+    "current_price": 3946.0,
+    "prev_close": 3822.0,
+    "volume": 66029500,
+    "price_change_pct": 3.2443746729461016,
+    "news_count": 0
+  },
+  "rule_result": {
+    "symbol": "9984.T",
+    "passed": false,
+    "score": 100,
+    "reasons_positive": [
+      "出来高が基準以上 (66,029,500株)",
+      "前日比プラス (3.24%)",
+      "株価が25日線の上",
+      "25日線からの乖離が適正 (2.56%)",
+      "当日が陽線",
+      "押し目からの反発確認（エントリー候補）",
+      "直近で買い戻しが入っている"
+    ],
+    "reasons_negative": [
+      "25日線の勢いが弱い",
+      "トレンドが少し荒い",
+      "材料ニュースは目立たない",
+      "損切り幅が大きすぎる (15.15%)",
+      "RR不足 (0.00)",
+      "適正ロットを計算できない"
+    ],
+    "entry_idea": "押し目候補 / 3946.00円付近",
+    "stop_idea": "3348.18円割れで損切り",
+    "take_profit_idea": "4064.38円付近で利確候補",
+    "verdict": "押し目監視",
+    "setup_type": "pullback",
+    "entry_price": 3946.0,
+    "stop_price": 3348.18,
+    "take_profit_price": 4064.38,
+    "rr": 0.0,
+    "position_size": 0,
+    "risk_amount": 0.0
+  }
+}

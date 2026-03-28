@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-03-28T09:37:21.525942",
+  "snapshot": {
+    "symbol": "2413.T",
+    "name": "2413.T",
+    "current_price": 1625.0,
+    "prev_close": 1588.0,
+    "volume": 3225800,
+    "price_change_pct": 2.3299748110831233,
+    "news_count": 0
+  },
+  "rule_result": {
+    "symbol": "2413.T",
+    "passed": false,
+    "score": 125,
+    "reasons_positive": [
+      "出来高が基準以上 (3,225,800株)",
+      "前日比プラス (2.33%)",
+      "株価が25日線の上",
+      "25日線が上向き",
+      "直近で高値・安値の切り上げ傾向",
+      "25日線からの乖離が適正 (0.27%)",
+      "当日が陽線",
+      "押し目からの反発確認（エントリー候補）",
+      "直近で買い戻しが入っている"
+    ],
+    "reasons_negative": [
+      "材料ニュースは目立たない",
+      "損切り幅が大きすぎる (5.03%)",
+      "RR不足 (0.00)",
+      "適正ロットを計算できない"
+    ],
+    "entry_idea": "押し目候補 / 1625.00円付近",
+    "stop_idea": "1543.24円割れで損切り",
+    "take_profit_idea": "1673.75円付近で利確候補",
+    "verdict": "押し目監視",
+    "setup_type": "pullback",
+    "entry_price": 1625.0,
+    "stop_price": 1543.24,
+    "take_profit_price": 1673.75,
+    "rr": 0.0,
+    "position_size": 0,
+    "risk_amount": 0.0
+  }
+}
