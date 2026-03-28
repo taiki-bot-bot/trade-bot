@@ -18,16 +18,15 @@ LIMITS = {
     "サブスク": 3000
 }
 
+# ===== CSV =====
 files = glob.glob(DATA_PATH)
-
 if len(files) == 0:
     raise ValueError("CSVがない")
 
-df_list = [pd.read_csv(f) for f in files]
-df = pd.concat(df_list, ignore_index=True)
-
+df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
 df.columns = [str(c).strip() for c in df.columns]
 
+# ===== 列判定 =====
 amount_col = None
 text_col = None
 date_col = None
@@ -37,22 +36,23 @@ for c in df.columns:
 
     if "金額" in col or "amount" in col:
         amount_col = c
-
-    if "利用先" in col or "摘要" in col or "内容" in col or "description" in col:
+    if "利用先" in col or "摘要" in col or "内容" in col:
         text_col = c
-
     if "日付" in col or "date" in col:
         date_col = c
 
 if amount_col is None or text_col is None or date_col is None:
     raise ValueError(f"列が見つからん: {df.columns}")
 
+# ===== 型 =====
 df[amount_col] = pd.to_numeric(df[amount_col], errors="coerce")
 df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
 
+# ===== 重複削除 =====
 df["key"] = df[date_col].astype(str) + "_" + df[amount_col].astype(str) + "_" + df[text_col].astype(str)
 df = df.drop_duplicates(subset="key")
 
+# ===== 分類 =====
 def classify(text):
     text = str(text)
 
@@ -77,23 +77,33 @@ def classify(text):
 
 df["カテゴリ"] = df[text_col].apply(classify)
 
-now = datetime.now()
+# ===== 今月（テストは全体）=====
+df_month = df
 
-df_month = df[(df[date_col].dt.year == now.year) & (df[date_col].dt.month == now.month)]
-
+# ===== 集計 =====
 income = df_month[df_month[amount_col] > 0][amount_col].sum()
 expense = abs(df_month[df_month[amount_col] < 0][amount_col].sum())
-
 balance = income - expense
 rate = (balance / income * 100) if income > 0 else 0
 
+# ===== カテゴリ =====
 by_cat = df_month.groupby("カテゴリ")[amount_col].sum().abs().sort_values(ascending=False)
 
+# ===== 無駄 =====
 waste = 0
+waste_detail = []
+
 for k, v in by_cat.items():
     if k in LIMITS:
-        waste += max(0, v - LIMITS[k])
+        over = max(0, v - LIMITS[k])
+        waste += over
+        if over > 0:
+            waste_detail.append(f"{k}超過 +¥{int(over):,}")
 
+# ===== 改善案 =====
+improve_text = "\n".join(waste_detail) if waste_detail else "大きな無駄なし"
+
+# ===== 配分 =====
 if balance > 0:
     invest = int(balance * 0.3)
     cash = int(balance * 0.7)
@@ -101,20 +111,47 @@ else:
     invest = 0
     cash = 0
 
+# ===== 評価 =====
+if balance < 0:
+    grade = "D"
+elif rate >= 30:
+    grade = "S"
+elif rate >= 20:
+    grade = "A"
+elif rate >= 10:
+    grade = "B"
+else:
+    grade = "C"
+
+# ===== TOP支出 =====
+top_expense = by_cat.head(5).to_string()
+
+# ===== メッセージ =====
 message = f"""
 【収支BOT】
 
-収入：¥{int(income):,}
-支出：¥{int(expense):,}
+■総合
+評価：{grade}
 収支：¥{int(balance):,}
 貯蓄率：{rate:.1f}%
-
 改善余地：¥{int(waste):,}
 
+■今月
+収入：¥{int(income):,}
+支出：¥{int(expense):,}
+
+■支出TOP
+{top_expense}
+
+■改善ポイント
+{improve_text}
+
+■配分
 投資：¥{invest:,}
 現金：¥{cash:,}
 """
 
+# ===== LINE =====
 url = "https://api.line.me/v2/bot/message/push"
 
 headers = {
@@ -124,7 +161,7 @@ headers = {
 
 data = {
     "to": USER_ID,
-    "messages": [{"type": "text", "text": message}]
+    "messages": [{"type": "text", "text": message[:5000]}]
 }
 
 res = requests.post(url, headers=headers, json=data)
