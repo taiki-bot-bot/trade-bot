@@ -33,15 +33,19 @@ text_col = None
 date_col = None
 
 for c in df.columns:
-    if c in ["金額", "金額（円）"]:
+    col = str(c).lower()
+
+    if "金額" in col or "amount" in col:
         amount_col = c
-    if c in ["内容", "ご利用先"]:
+
+    if "利用先" in col or "摘要" in col or "内容" in col or "description" in col:
         text_col = c
-    if c in ["日付"]:
+
+    if "日付" in col or "date" in col:
         date_col = c
 
 if amount_col is None or text_col is None or date_col is None:
-    raise ValueError("列が見つからん")
+    raise ValueError(f"列が見つからん: {df.columns}")
 
 df[amount_col] = pd.to_numeric(df[amount_col], errors="coerce")
 df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
@@ -52,7 +56,7 @@ df = df.drop_duplicates(subset="key")
 def classify(text):
     text = str(text)
 
-    if "セブン" in text or "ファミマ" in text:
+    if "セブン" in text or "ファミマ" in text or "ローソン" in text:
         return "コンビニ"
     elif "AMZN DIGITAL" in text or "プライム" in text:
         return "サブスク"
