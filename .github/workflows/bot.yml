@@ -2,10 +2,14 @@ name: trade-bot
 
 on:
   schedule:
-    - cron: '0 9 * * 1-5'
-    - cron: '0 12 * * 1-5'
-    - cron: '0 15 * * 1-5'
-    - cron: '50 15 * * 1-5'
+    # 通常BOT（日本時間）
+    - cron: '0 0 * * 1-5'    # 09:00
+    - cron: '0 3 * * 1-5'    # 12:00
+    - cron: '0 6 * * 1-5'    # 15:00
+
+    # シナリオ＆分析（日本時間15:50）
+    - cron: '50 6 * * 1-5'
+
   workflow_dispatch:
 
 jobs:
@@ -23,7 +27,7 @@ jobs:
 
       # 通常BOT
       - name: Run Trade Bot
-        if: github.event.schedule != '50 15 * * 1-5'
+        if: github.event.schedule != '50 6 * * 1-5'
         run: python trade_bot.py
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
@@ -32,7 +36,7 @@ jobs:
 
       # シナリオ
       - name: Run Pre Scenario
-        if: github.event.schedule == '50 15 * * 1-5'
+        if: github.event.schedule == '50 6 * * 1-5'
         run: python trade_bot.py
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
@@ -41,7 +45,7 @@ jobs:
 
       # 分析
       - name: Run Analyze Logs
-        if: github.event.schedule == '50 15 * * 1-5'
+        if: github.event.schedule == '50 6 * * 1-5'
         run: python analyze_logs.py
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
