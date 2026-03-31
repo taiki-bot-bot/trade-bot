@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import json
 import os
 from dataclasses import dataclass, asdict
@@ -123,7 +124,15 @@ def log(message: str) -> None:
 
 
 def safe_div(a: float, b: float) -> float:
-    return a / b if b else 0.0
+    if a is None or b is None:
+        return 0.0
+    if isinstance(a, float) and math.isnan(a):
+        return 0.0
+    if isinstance(b, float) and math.isnan(b):
+        return 0.0
+    if b == 0:
+        return 0.0
+    return a / b
 
 
 def sma(values: List[float], period: int) -> List[Optional[float]]:
@@ -131,9 +140,20 @@ def sma(values: List[float], period: int) -> List[Optional[float]]:
     for i in range(len(values)):
         if i + 1 < period:
             result.append(None)
-        else:
-            window = values[i + 1 - period: i + 1]
-            result.append(sum(window) / period)
+            continue
+
+        window = values[i + 1 - period: i + 1]
+
+        if any(v is None for v in window):
+            result.append(None)
+            continue
+
+        if any(isinstance(v, float) and math.isnan(v) for v in window):
+            result.append(None)
+            continue
+
+        result.append(sum(window) / period)
+
     return result
 
 
@@ -348,14 +368,33 @@ def get_real_bars(ticker: str, period: str = "6mo") -> List[PriceBar]:
 
     bars: List[PriceBar] = []
     for date, row in hist.iterrows():
+        try:
+            o = float(row["Open"])
+            h = float(row["High"])
+            l = float(row["Low"])
+            c = float(row["Close"])
+            v = float(row["Volume"])
+        except Exception:
+            continue
+
+        values = [o, h, l, c, v]
+
+        # NaNを除外
+        if any(math.isnan(x) for x in values):
+            continue
+
+        # おかしな値を除外
+        if c <= 0 or h <= 0 or l <= 0:
+            continue
+
         bars.append(
             PriceBar(
                 date=str(date.date()),
-                open=float(row["Open"]),
-                high=float(row["High"]),
-                low=float(row["Low"]),
-                close=float(row["Close"]),
-                volume=int(row["Volume"]),
+                open=o,
+                high=h,
+                low=l,
+                close=c,
+                volume=int(v),
             )
         )
     return bars
@@ -593,10 +632,16 @@ class PreScenarioEngine:
 
         ma25_list = sma(closes, 25)
         ma75_list = sma(closes, 75)
+
         sma25_now = ma25_list[-1]
         sma75_now = ma75_list[-1]
 
         if sma25_now is None or sma75_now is None:
+            return None
+
+        if isinstance(sma25_now, float) and math.isnan(sma25_now):
+            return None
+        if isinstance(sma75_now, float) and math.isnan(sma75_now):
             return None
 
         close = closes[-1]
@@ -604,17 +649,44 @@ class PreScenarioEngine:
         high = highs[-1]
         low = lows[-1]
         volume = volumes[-1]
-        avg_volume20 = sum(volumes[-20:]) / 20
+
+        raw_vals = [close, open_, high, low, volume]
+        for v in raw_vals:
+            if v is None:
+                return None
+            if isinstance(v, float) and math.isnan(v):
+                return None
+
+        if len(volumes) < 20:
+            return None
 
         recent_high, recent_low = pick_recent_high_low_from_bars(snapshot.bars, lookback=10)
+
+        if recent_high is None or recent_low is None:
+            return None
+        if isinstance(recent_high, float) and math.isnan(recent_high):
+            return None
+        if isinstance(recent_low, float) and math.isnan(recent_low):
+            return None
+
+        avg_volume20 = sum(volumes[-20:]) / 20
+        if isinstance(avg_volume20, float) and math.isnan(avg_volume20):
+            return None
 
         dynamic_score = calc_dynamic_score_from_snapshot(snapshot)
         volume_ratio = round(safe_div(volume, avg_volume20), 2)
         range_pct = round(safe_div((high - low), close) * 100, 2)
 
+        calc_vals = [dynamic_score, volume_ratio, range_pct]
+        for v in calc_vals:
+            if v is None:
+                return None
+            if isinstance(v, float) and math.isnan(v):
+                return None
+
         is_uptrend = (close > sma25_now) and (sma25_now > sma75_now)
         near_recent_high = close >= recent_high * 0.985
-        near_sma25 = abs(close - sma25_now) / close <= 0.02
+        near_sma25 = safe_div(abs(close - sma25_now), close) <= 0.02
         weak_trend = close < sma25_now
         bullish_today = close > open_
 
@@ -655,7 +727,7 @@ class PreScenarioEngine:
             entry_condition=entry_condition,
             invalid_condition=invalid_condition,
             comment=comment,
-            dynamic_score=dynamic_score,
+            dynamic_score=round(dynamic_score, 2),
             volume_ratio=volume_ratio,
             range_pct=range_pct,
         )
