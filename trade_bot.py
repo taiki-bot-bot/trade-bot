@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import json
 import os
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -15,6 +15,7 @@ import yfinance as yf
 # たいき専用 トレードBOT 夜仕込み版
 # 候補抽出 + 判定 + ログ保存 + 15:50事前シナリオ通知
 # ※ GO通知は廃止
+# ※ 監視候補 / 夜仕込み候補 / 理由見える化 対応版
 # ==============================
 
 # ---------- LINE設定 ----------
@@ -83,12 +84,12 @@ CONFIG = {
 
     # 事前シナリオ
     "prescenario_top_n": 5,
+    "monitor_top_n": 5,
 
     # 夜仕込み用
     "night_breakout_buffer": 0.003,      # 高値の少し上に逆指値
     "night_pullback_buffer": 0.002,      # 25日線の少し上に指値
     "night_rr_target": 2.0,              # 利確RR
-    "prescenario_only_orderable": True,  # 注文可能な銘柄だけ通知
 
     "candidate_symbols": [
         "7203.T",
@@ -230,6 +231,12 @@ def calc_dynamic_score_from_snapshot(snapshot: "SymbolSnapshot") -> float:
     return round(dynamic_score, 2)
 
 
+def format_reason_lines(items: List[str], limit: int = 5) -> str:
+    if not items:
+        return "・なし"
+    return "\n".join([f"・{x}" for x in items[:limit]])
+
+
 # ---------- データ構造 ----------
 @dataclass
 class PriceBar:
@@ -309,6 +316,9 @@ class PreScenario:
     position_size: int = 0
     risk_amount: float = 0.0
     order_ready: bool = False
+
+    reasons_positive: List[str] = field(default_factory=list)
+    reasons_negative: List[str] = field(default_factory=list)
 
 
 # ---------- 候補抽出 ----------
@@ -693,13 +703,6 @@ class PreScenarioEngine:
         volume_ratio = round(safe_div(volume, avg_volume20), 2)
         range_pct = round(safe_div((high - low), close) * 100, 2)
 
-        calc_vals = [dynamic_score, volume_ratio, range_pct]
-        for v in calc_vals:
-            if v is None:
-                return None
-            if isinstance(v, float) and math.isnan(v):
-                return None
-
         is_uptrend = (close > sma25_now) and (sma25_now > sma75_now)
         near_recent_high = close >= recent_high * 0.985
         near_sma25 = safe_div(abs(close - sma25_now), close) <= 0.02
@@ -721,6 +724,35 @@ class PreScenarioEngine:
         risk_amount = 0.0
         order_ready = False
 
+        positives: List[str] = []
+        negatives: List[str] = []
+
+        if is_uptrend:
+            positives.append("上昇トレンド（株価 > 25日線 > 75日線）")
+        else:
+            negatives.append("上昇トレンド条件未達")
+
+        if bullish_today:
+            positives.append("当日陽線")
+        else:
+            negatives.append("当日陰線")
+
+        positives.append(f"出来高倍率 {volume_ratio}")
+        positives.append(f"値幅 {range_pct}%")
+
+        distance_to_sma25_pct = safe_div(abs(close - sma25_now), close) * 100
+        positives.append(f"25日線乖離 {round(distance_to_sma25_pct, 2)}%")
+
+        if near_recent_high:
+            positives.append("高値圏に接近")
+        else:
+            negatives.append("高値圏までもう少し")
+
+        if near_sma25:
+            positives.append("25日線付近")
+        else:
+            negatives.append("25日線からやや遠い")
+
         if is_uptrend and near_sma25 and bullish_today:
             scenario_type = "押し目待ち"
             status = "上昇トレンド継続"
@@ -733,6 +765,7 @@ class PreScenarioEngine:
             take_profit_price = round(
                 entry_price + (entry_price - stop_price) * CONFIG["night_rr_target"], 1
             )
+            positives.append("押し目条件に合致")
 
         elif is_uptrend and near_recent_high:
             scenario_type = "ブレイク待ち"
@@ -746,18 +779,21 @@ class PreScenarioEngine:
             take_profit_price = round(
                 entry_price + (entry_price - stop_price) * CONFIG["night_rr_target"], 1
             )
+            positives.append("ブレイク監視条件に合致")
 
         elif weak_trend:
             scenario_type = "見送り"
             status = "トレンド弱め"
             entry_condition = "まだ弱いので待機"
             comment = "優先度低め。無理に触らない"
+            negatives.append("株価が25日線より下")
 
         else:
             scenario_type = "様子見"
             status = "中立"
             entry_condition = f"{round(recent_high, 1)}上抜け or {round(sma25_now, 1)}反発待ち"
             comment = "条件がまだ中途半端"
+            negatives.append("押し目/ブレイクどちらも未完成")
 
         if entry_price > 0 and stop_price > 0 and take_profit_price > 0:
             stop_pct = safe_div((entry_price - stop_price), entry_price)
@@ -766,17 +802,24 @@ class PreScenarioEngine:
                 rr = calc_rr(entry_price, stop_price, take_profit_price)
                 position_size, risk_amount = calc_position_size(entry_price, stop_price)
 
+                positives.append(f"損切り幅 {round(stop_pct * 100, 2)}%")
+                positives.append(f"RR {round(rr, 2)}")
+                positives.append(f"想定ロット {position_size}株")
+
                 if rr >= CONFIG["min_rr"] and position_size > 0:
                     order_ready = True
+                    positives.append("夜仕込み可能")
+                else:
+                    if rr < CONFIG["min_rr"]:
+                        negatives.append(f"RR不足 ({round(rr, 2)})")
+                    if position_size <= 0:
+                        negatives.append("適正ロットを計算できない")
+            else:
+                negatives.append(f"損切り幅が広すぎる ({round(stop_pct * 100, 2)}%)")
 
         if not order_ready:
-            order_type = "なし"
-            entry_price = 0.0
-            stop_price = 0.0
-            take_profit_price = 0.0
-            rr = 0.0
-            position_size = 0
-            risk_amount = 0.0
+            if entry_price <= 0:
+                negatives.append("注文価格未確定")
 
         return PreScenario(
             symbol=snapshot.symbol,
@@ -801,14 +844,16 @@ class PreScenarioEngine:
             position_size=position_size,
             risk_amount=round(risk_amount, 0),
             order_ready=order_ready,
+            reasons_positive=positives,
+            reasons_negative=negatives,
         )
 
 
 # ---------- レポート整形 ----------
 class ReportFormatter:
     def format_line_message(self, snapshot: SymbolSnapshot, result: RuleResult) -> str:
-        positives = "\n".join([f"・{x}" for x in result.reasons_positive[:5]]) if result.reasons_positive else "・なし"
-        negatives = "\n".join([f"・{x}" for x in result.reasons_negative[:5]]) if result.reasons_negative else "・なし"
+        positives = format_reason_lines(result.reasons_positive)
+        negatives = format_reason_lines(result.reasons_negative)
 
         return (
             f"【トレードBOT通知】\n"
@@ -832,25 +877,52 @@ class ReportFormatter:
 
     def format_pre_scenario_message(self, scenarios: List[PreScenario], top_n: int = 5) -> str:
         if not scenarios:
-            return "【夜仕込み候補】\n該当なし"
+            return "【監視候補】なし\n\n【夜仕込み候補】なし"
 
-        if CONFIG.get("prescenario_only_orderable", True):
-            scenarios = [s for s in scenarios if s.order_ready]
-
-        if not scenarios:
-            return "【夜仕込み候補】\n注文できる候補なし"
-
-        sorted_scenarios = sorted(
+        sorted_all = sorted(
             scenarios,
+            key=lambda x: x.dynamic_score,
+            reverse=True
+        )[:CONFIG["monitor_top_n"]]
+
+        orderable = [s for s in scenarios if s.order_ready]
+        sorted_orderable = sorted(
+            orderable,
             key=lambda x: x.dynamic_score,
             reverse=True
         )[:top_n]
 
         lines: List[str] = []
-        lines.append("【夜仕込み候補】")
+
+        # ===== 監視候補 =====
+        lines.append(f"【監視候補 TOP{len(sorted_all)}】")
         lines.append("")
 
-        for s in sorted_scenarios:
+        for i, s in enumerate(sorted_all, start=1):
+            lines.append(f"{i}. {s.symbol} {s.name}")
+            lines.append(f"状況：{s.status}")
+            lines.append(f"型：{s.scenario_type}")
+            lines.append(
+                f"監視：高値 {s.recent_high} / 安値 {s.recent_low} / 25日線 {s.sma25} / 75日線 {s.sma75}"
+            )
+            lines.append("監視理由：")
+            lines.append(format_reason_lines(s.reasons_positive, limit=6))
+            lines.append("注意：")
+            lines.append(format_reason_lines(s.reasons_negative, limit=4))
+            lines.append("")
+
+        lines.append("----------------------")
+        lines.append("")
+
+        # ===== 夜仕込み候補 =====
+        lines.append(f"【夜仕込み候補 TOP{len(sorted_orderable)}】")
+        lines.append("")
+
+        if not sorted_orderable:
+            lines.append("注文できる候補なし")
+            return "\n".join(lines)
+
+        for i, s in enumerate(sorted_orderable, start=1):
             entry = int(round(s.entry_price))
             stop = int(round(s.stop_price))
             take = int(round(s.take_profit_price))
@@ -862,7 +934,11 @@ class ReportFormatter:
             else:
                 continue
 
-            lines.append(f"{s.symbol} {s.name}")
+            lines.append(f"{i}. {s.symbol} {s.name}")
+            lines.append(f"状況：{s.status}")
+            lines.append(f"型：{s.scenario_type}")
+            lines.append("根拠：")
+            lines.append(format_reason_lines(s.reasons_positive, limit=6))
             lines.append("")
             lines.append("■新規注文")
             lines.append(order_text)
@@ -873,6 +949,7 @@ class ReportFormatter:
             lines.append(f"損切：逆指値 {stop}円")
             lines.append("")
             lines.append(f"RR：{s.rr:.2f}")
+            lines.append(f"無効条件：{s.invalid_condition}")
             lines.append("----------------------")
 
         return "\n".join(lines)
