@@ -79,15 +79,15 @@ CONFIG = {
     "account_size": 1_000_000,        # 口座資金
     "risk_per_trade": 0.01,           # 1回の許容損失 1%
     "max_position_ratio": 0.25,       # 1銘柄に入れる最大資金比率
-    "min_rr": 1.5,                    # 最低RR
-    "max_stop_pct": 0.05,             # 損切り幅5%超は見送り
+    "min_rr": 1.3,                    # 最低RR
+    "max_stop_pct": 0.06,             # 損切り幅6%超は見送り
 
     # 事前シナリオ
     "prescenario_top_n": 5,
     "monitor_top_n": 5,
 
     # 夜仕込み用
-    "night_breakout_buffer": 0.003,      # 高値の少し上に逆指値
+    "night_breakout_buffer": 0.002,      # 高値の少し上に逆指値
     "night_pullback_buffer": 0.002,      # 25日線の少し上に指値
     "night_rr_target": 2.0,              # 利確RR
 
