@@ -834,44 +834,53 @@ class ReportFormatter:
         )
 
     def format_pre_scenario_message(self, scenarios: List[PreScenario], top_n: int = 5) -> str:
-        if not scenarios:
-            return "【本日の夜仕込み候補】\n該当なし"
+    if not scenarios:
+        return "【夜仕込み候補】\n該当なし"
 
-        if CONFIG.get("prescenario_only_orderable", True):
-            scenarios = [s for s in scenarios if s.order_ready]
+    if CONFIG.get("prescenario_only_orderable", True):
+        scenarios = [s for s in scenarios if s.order_ready]
 
-        if not scenarios:
-            return "【本日の夜仕込み候補】\n注文できる候補なし"
+    if not scenarios:
+        return "【夜仕込み候補】\n注文できる候補なし"
 
-        sorted_scenarios = sorted(
-            scenarios,
-            key=lambda x: x.dynamic_score,
-            reverse=True
-        )[:top_n]
+    sorted_scenarios = sorted(
+        scenarios,
+        key=lambda x: x.dynamic_score,
+        reverse=True
+    )[:top_n]
 
-        lines: List[str] = []
-        lines.append(f"【本日の夜仕込み候補 TOP{len(sorted_scenarios)}】")
+    lines: List[str] = []
+    lines.append("【夜仕込み候補】")
+    lines.append("")
+
+    for s in sorted_scenarios:
+        # SBI用に整数化
+        entry = int(round(s.entry_price))
+        stop = int(round(s.stop_price))
+        take = int(round(s.take_profit_price))
+
+        if s.order_type == "逆指値":
+            order_text = f"買い：逆指値 {entry}円"
+        elif s.order_type == "指値":
+            order_text = f"買い：指値 {entry}円"
+        else:
+            continue
+
+        lines.append(f"{s.symbol} {s.name}")
         lines.append("")
+        lines.append("■新規注文")
+        lines.append(order_text)
+        lines.append(f"株数：{s.position_size}株")
+        lines.append("")
+        lines.append("■決済注文（IFD-OCO）")
+        lines.append(f"利確：指値 {take}円")
+        lines.append(f"損切：逆指値 {stop}円")
+        lines.append("")
+        lines.append(f"RR：{s.rr:.2f}")
+        lines.append("----------------------")
 
-        for i, s in enumerate(sorted_scenarios, start=1):
-            lines.append(f"{i}. {s.symbol} {s.name}")
-            lines.append(f"状況：{s.status}")
-            lines.append(f"型：{s.scenario_type}")
-            lines.append(f"注文：{s.order_type}")
-            lines.append(f"エントリー：{s.entry_price:.1f}円")
-            lines.append(f"損切り：{s.stop_price:.1f}円")
-            lines.append(f"利確目安：{s.take_profit_price:.1f}円")
-            lines.append(f"RR：{s.rr:.2f}")
-            lines.append(f"ロット：{s.position_size}株")
-            lines.append(f"許容損失：{s.risk_amount:.0f}円")
-            lines.append(f"監視：高値 {s.recent_high} / 安値 {s.recent_low} / 25日線 {s.sma25}")
-            lines.append(f"条件無効：{s.invalid_condition}")
-            lines.append(f"勢い：{s.dynamic_score}  出来高倍率：{s.volume_ratio}  値幅%：{s.range_pct}")
-            lines.append(f"コメント：{s.comment}")
-            lines.append("")
-
-        return "\n".join(lines)
-
+    return "\n".join(lines)
+   
     def format_log_json(self, snapshot: SymbolSnapshot, result: RuleResult) -> Dict[str, Any]:
         return {
             "timestamp": datetime.now().isoformat(),
@@ -886,7 +895,6 @@ class ReportFormatter:
             },
             "rule_result": asdict(result),
         }
-
 
 # ---------- LINE通知 ----------
 class LineNotifier:
