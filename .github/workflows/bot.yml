@@ -24,7 +24,7 @@ jobs:
           pip install --upgrade pip
           pip install yfinance requests
 
-      - name: BOT実行（事前シナリオ）
+      - name: BOT実行（夜仕込み）
         run: python trade_bot.py
         env:
           RUN_MODE: prescenario
