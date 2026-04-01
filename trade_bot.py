@@ -205,8 +205,8 @@ def calc_dynamic_score_from_snapshot(snapshot: "SymbolSnapshot") -> float:
     if len(closes) < 75 or len(volumes) < 20:
         return 0.0
 
-    sma25 = sma(closes, 25)[-1]
-    sma75 = sma(closes, 75)[-1]
+    sma25_now = sma(closes, 25)[-1]
+    sma75_now = sma(closes, 75)[-1]
     close = closes[-1]
     high = highs[-1]
     low = lows[-1]
@@ -217,9 +217,9 @@ def calc_dynamic_score_from_snapshot(snapshot: "SymbolSnapshot") -> float:
     range_pct = safe_div((high - low), close)
 
     trend_score = 0
-    if sma25 is not None and close > sma25:
+    if sma25_now is not None and close > sma25_now:
         trend_score += 1
-    if sma25 is not None and sma75 is not None and sma25 > sma75:
+    if sma25_now is not None and sma75_now is not None and sma25_now > sma75_now:
         trend_score += 1
 
     dynamic_score = (
@@ -275,7 +275,7 @@ class RuleResult:
     stop_idea: str
     take_profit_idea: str
     verdict: str
-    setup_type: str = "none"           # pullback / breakout / none
+    setup_type: str = "none"
     entry_price: float = 0.0
     stop_price: float = 0.0
     take_profit_price: float = 0.0
@@ -301,8 +301,7 @@ class PreScenario:
     volume_ratio: float
     range_pct: float
 
-    # 夜仕込み用
-    order_type: str = "なし"          # 指値 / 逆指値 / なし
+    order_type: str = "なし"
     entry_price: float = 0.0
     stop_price: float = 0.0
     take_profit_price: float = 0.0
@@ -356,7 +355,6 @@ class MarketDataClient:
 # ---------- ニュース ----------
 class NewsClient:
     def get_news_for_symbol(self, symbol: str) -> List[NewsItem]:
-        # 今は未使用。将来ここに材料ニュースを足せる
         return []
 
 
@@ -491,7 +489,6 @@ class RuleEngine:
         else:
             negatives.append("直近トレンド判定用データ不足")
 
-        distance_to_ma25 = None
         if ma25_now is not None:
             distance_to_ma25 = safe_div((latest_close - ma25_now), ma25_now) * 100
             if latest_close > ma25_now:
@@ -834,53 +831,52 @@ class ReportFormatter:
         )
 
     def format_pre_scenario_message(self, scenarios: List[PreScenario], top_n: int = 5) -> str:
-    if not scenarios:
-        return "【夜仕込み候補】\n該当なし"
+        if not scenarios:
+            return "【夜仕込み候補】\n該当なし"
 
-    if CONFIG.get("prescenario_only_orderable", True):
-        scenarios = [s for s in scenarios if s.order_ready]
+        if CONFIG.get("prescenario_only_orderable", True):
+            scenarios = [s for s in scenarios if s.order_ready]
 
-    if not scenarios:
-        return "【夜仕込み候補】\n注文できる候補なし"
+        if not scenarios:
+            return "【夜仕込み候補】\n注文できる候補なし"
 
-    sorted_scenarios = sorted(
-        scenarios,
-        key=lambda x: x.dynamic_score,
-        reverse=True
-    )[:top_n]
+        sorted_scenarios = sorted(
+            scenarios,
+            key=lambda x: x.dynamic_score,
+            reverse=True
+        )[:top_n]
 
-    lines: List[str] = []
-    lines.append("【夜仕込み候補】")
-    lines.append("")
-
-    for s in sorted_scenarios:
-        # SBI用に整数化
-        entry = int(round(s.entry_price))
-        stop = int(round(s.stop_price))
-        take = int(round(s.take_profit_price))
-
-        if s.order_type == "逆指値":
-            order_text = f"買い：逆指値 {entry}円"
-        elif s.order_type == "指値":
-            order_text = f"買い：指値 {entry}円"
-        else:
-            continue
-
-        lines.append(f"{s.symbol} {s.name}")
+        lines: List[str] = []
+        lines.append("【夜仕込み候補】")
         lines.append("")
-        lines.append("■新規注文")
-        lines.append(order_text)
-        lines.append(f"株数：{s.position_size}株")
-        lines.append("")
-        lines.append("■決済注文（IFD-OCO）")
-        lines.append(f"利確：指値 {take}円")
-        lines.append(f"損切：逆指値 {stop}円")
-        lines.append("")
-        lines.append(f"RR：{s.rr:.2f}")
-        lines.append("----------------------")
 
-    return "\n".join(lines)
-   
+        for s in sorted_scenarios:
+            entry = int(round(s.entry_price))
+            stop = int(round(s.stop_price))
+            take = int(round(s.take_profit_price))
+
+            if s.order_type == "逆指値":
+                order_text = f"買い：逆指値 {entry}円"
+            elif s.order_type == "指値":
+                order_text = f"買い：指値 {entry}円"
+            else:
+                continue
+
+            lines.append(f"{s.symbol} {s.name}")
+            lines.append("")
+            lines.append("■新規注文")
+            lines.append(order_text)
+            lines.append(f"株数：{s.position_size}株")
+            lines.append("")
+            lines.append("■決済注文（IFD-OCO）")
+            lines.append(f"利確：指値 {take}円")
+            lines.append(f"損切：逆指値 {stop}円")
+            lines.append("")
+            lines.append(f"RR：{s.rr:.2f}")
+            lines.append("----------------------")
+
+        return "\n".join(lines)
+
     def format_log_json(self, snapshot: SymbolSnapshot, result: RuleResult) -> Dict[str, Any]:
         return {
             "timestamp": datetime.now().isoformat(),
@@ -895,6 +891,7 @@ class ReportFormatter:
             },
             "rule_result": asdict(result),
         }
+
 
 # ---------- LINE通知 ----------
 class LineNotifier:
