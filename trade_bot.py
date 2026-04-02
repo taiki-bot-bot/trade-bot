@@ -76,7 +76,7 @@ CONFIG = {
     "stop_buffer": 0.995,             # 損切りは直近安値の少し下
 
     # 資金管理
-    "account_size": 1_000_000,        # 口座資金
+    "account_size": 100_000,        # 口座資金
     "risk_per_trade": 0.01,           # 1回の許容損失 1%
     "max_position_ratio": 0.25,       # 1銘柄に入れる最大資金比率
     "min_rr": 1.3,                    # 最低RR
