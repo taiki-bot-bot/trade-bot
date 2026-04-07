@@ -16,6 +16,7 @@ import yfinance as yf
 # 候補抽出 + 判定 + ログ保存 + 15:50事前シナリオ通知
 # ※ GO通知は廃止
 # ※ 監視候補 / 夜仕込み候補 / 理由見える化 対応版
+# ※ 日本株100株単位対応版
 # ==============================
 
 # ---------- LINE設定 ----------
@@ -76,20 +77,21 @@ CONFIG = {
     "stop_buffer": 0.995,             # 損切りは直近安値の少し下
 
     # 資金管理
-    "account_size": 100_000,        # 口座資金
+    "account_size": 100_000,          # 口座資金
     "risk_per_trade": 0.01,           # 1回の許容損失 1%
     "max_position_ratio": 0.25,       # 1銘柄に入れる最大資金比率
     "min_rr": 1.3,                    # 最低RR
     "max_stop_pct": 0.06,             # 損切り幅6%超は見送り
+    "lot_size_jp": 100,               # 日本株は100株単位
 
     # 事前シナリオ
     "prescenario_top_n": 5,
     "monitor_top_n": 5,
 
     # 夜仕込み用
-    "night_breakout_buffer": 0.002,      # 高値の少し上に逆指値
-    "night_pullback_buffer": 0.002,      # 25日線の少し上に指値
-    "night_rr_target": 2.0,              # 利確RR
+    "night_breakout_buffer": 0.002,   # 高値の少し上に逆指値
+    "night_pullback_buffer": 0.002,   # 25日線の少し上に指値
+    "night_rr_target": 2.0,           # 利確RR
 
     "candidate_symbols": [
         "7203.T",
@@ -181,9 +183,33 @@ def calc_position_size(entry: float, stop: float) -> Tuple[int, float]:
     if risk_per_share <= 0:
         return 0, 0.0
 
-    raw_size = risk_amount / risk_per_share
-    max_size_by_cash = (CONFIG["account_size"] * CONFIG["max_position_ratio"]) / entry
-    size = int(min(raw_size, max_size_by_cash))
+    lot_size = CONFIG["lot_size_jp"]
+
+    # 最低1単元の必要資金
+    min_order_cost = entry * lot_size
+
+    # 1銘柄に使ってよい最大資金
+    max_cash_for_position = CONFIG["account_size"] * CONFIG["max_position_ratio"]
+
+    # そもそも1単元買えない
+    if min_order_cost > CONFIG["account_size"]:
+        return 0, risk_amount
+
+    # 1銘柄上限に引っかかる
+    if min_order_cost > max_cash_for_position:
+        return 0, risk_amount
+
+    # リスク許容から何株持てるか
+    raw_size_by_risk = risk_amount / risk_per_share
+
+    # 資金上限から何株持てるか
+    raw_size_by_cash = max_cash_for_position / entry
+
+    # 小さい方を採用
+    max_shares = min(raw_size_by_risk, raw_size_by_cash)
+
+    # 100株単位に切り下げ
+    size = int(max_shares // lot_size) * lot_size
 
     return max(size, 0), risk_amount
 
@@ -316,6 +342,7 @@ class PreScenario:
     position_size: int = 0
     risk_amount: float = 0.0
     order_ready: bool = False
+    min_order_cost: float = 0.0
 
     reasons_positive: List[str] = field(default_factory=list)
     reasons_negative: List[str] = field(default_factory=list)
@@ -597,7 +624,7 @@ class RuleEngine:
             negatives.append(f"RR不足 ({rr:.2f})")
 
         if setup_type != "none" and position_size <= 0:
-            negatives.append("適正ロットを計算できない")
+            negatives.append("100株単位で発注不可（資金または上限不足）")
 
         passed = (
             score >= CONFIG["min_score_to_notify"]
@@ -723,6 +750,7 @@ class PreScenarioEngine:
         position_size = 0
         risk_amount = 0.0
         order_ready = False
+        min_order_cost = 0.0
 
         positives: List[str] = []
         negatives: List[str] = []
@@ -797,6 +825,7 @@ class PreScenarioEngine:
 
         if entry_price > 0 and stop_price > 0 and take_profit_price > 0:
             stop_pct = safe_div((entry_price - stop_price), entry_price)
+            min_order_cost = entry_price * CONFIG["lot_size_jp"]
 
             if stop_pct <= CONFIG["max_stop_pct"] and entry_price > stop_price:
                 rr = calc_rr(entry_price, stop_price, take_profit_price)
@@ -804,6 +833,7 @@ class PreScenarioEngine:
 
                 positives.append(f"損切り幅 {round(stop_pct * 100, 2)}%")
                 positives.append(f"RR {round(rr, 2)}")
+                positives.append(f"最低必要資金 {round(min_order_cost):,}円")
                 positives.append(f"想定ロット {position_size}株")
 
                 if rr >= CONFIG["min_rr"] and position_size > 0:
@@ -813,7 +843,7 @@ class PreScenarioEngine:
                     if rr < CONFIG["min_rr"]:
                         negatives.append(f"RR不足 ({round(rr, 2)})")
                     if position_size <= 0:
-                        negatives.append("適正ロットを計算できない")
+                        negatives.append("100株単位で発注不可（資金または上限不足）")
             else:
                 negatives.append(f"損切り幅が広すぎる ({round(stop_pct * 100, 2)}%)")
 
@@ -844,6 +874,7 @@ class PreScenarioEngine:
             position_size=position_size,
             risk_amount=round(risk_amount, 0),
             order_ready=order_ready,
+            min_order_cost=round(min_order_cost, 0),
             reasons_positive=positives,
             reasons_negative=negatives,
         )
@@ -942,6 +973,7 @@ class ReportFormatter:
             lines.append("")
             lines.append("■新規注文")
             lines.append(order_text)
+            lines.append(f"最低必要資金：{int(round(s.min_order_cost)):,}円")
             lines.append(f"株数：{s.position_size}株")
             lines.append("")
             lines.append("■決済注文（IFD-OCO）")
