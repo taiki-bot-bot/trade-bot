@@ -2,15 +2,13 @@ name: US Trade Bot
 
 on:
   schedule:
-    # 米国市場の通常監視
-    # 日本時間 23:40 / 01:00 / 04:00
-    - cron: "40 14 * * 1-5"
-    - cron: "0 16 * * 2-6"
-    - cron: "0 19 * * 2-6"
-
-    # 事前シナリオ通知
-    # 日本時間 23:20
+    # ■ 事前シナリオ（日本時間 23:20）
     - cron: "20 14 * * 1-5"
+
+    # ■ 通常監視（日本時間）
+    - cron: "40 14 * * 1-5"  # 23:40
+    - cron: "0 16 * * 2-6"   # 01:00
+    - cron: "30 18 * * 2-6"  # 03:30
 
   workflow_dispatch:
 
@@ -32,7 +30,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install yfinance requests pandas
 
-      - name: Run US pre-scenario mode
+      - name: Run US pre-scenario
         if: github.event_name == 'schedule' && github.event.schedule == '20 14 * * 1-5'
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
@@ -40,7 +38,7 @@ jobs:
           RUN_MODE: prescenario
         run: python trade_bot_us.py
 
-      - name: Run US trade mode
+      - name: Run US trade
         if: |
           github.event_name == 'workflow_dispatch' ||
           (github.event_name == 'schedule' && github.event.schedule != '20 14 * * 1-5')
@@ -50,7 +48,7 @@ jobs:
           RUN_MODE: trade
         run: python trade_bot_us.py
 
-      - name: Upload US logs
+      - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
