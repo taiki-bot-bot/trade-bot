@@ -17,6 +17,7 @@ import yfinance as yf
 # ※ 1株単位対応
 # ※ ドル建て
 # ※ GO通知は廃止
+# ※ 前兆シグナル対応版
 # ==============================
 
 # ---------- LINE設定 ----------
@@ -77,6 +78,7 @@ CONFIG = {
     # 事前シナリオ
     "prescenario_top_n": 5,
     "monitor_top_n": 5,
+    "signal_top_n": 5,               # 前兆シグナル表示数
 
     # 夜仕込み用
     "night_breakout_buffer": 0.003,
@@ -261,6 +263,18 @@ class RuleResult:
 
 
 @dataclass
+class SignalHint:
+    symbol: str
+    name: str
+    status: str
+    hint_type: str
+    trigger_text: str
+    dynamic_score: float
+    reasons_positive: List[str] = field(default_factory=list)
+    reasons_negative: List[str] = field(default_factory=list)
+
+
+@dataclass
 class PreScenario:
     symbol: str
     name: str
@@ -303,7 +317,7 @@ class MarketDataClient:
                 if hist.empty or len(hist) < 2:
                     continue
 
-                prev_close = float(hist["Close"].iloc[-2])
+                    prev_close = float(hist["Close"].iloc[-2])
                 current_price = float(hist["Close"].iloc[-1])
                 volume = int(hist["Volume"].iloc[-1])
                 change_pct = safe_div((current_price - prev_close), prev_close) * 100
@@ -430,7 +444,6 @@ class RuleEngine:
         positives: List[str] = []
         negatives: List[str] = []
 
-        # 米株は弱い上げを減らす
         if snapshot.price_change_pct >= 1.0:
             score += 10
             positives.append(f"前日比がしっかりプラス ({snapshot.price_change_pct:.2f}%)")
@@ -617,6 +630,99 @@ class RuleEngine:
         )
 
 
+# ---------- 前兆シグナル ----------
+class SignalHintEngine:
+    def evaluate(self, snapshot: SymbolSnapshot) -> Optional[SignalHint]:
+        closes = [b.close for b in snapshot.bars]
+        highs = [b.high for b in snapshot.bars]
+        lows = [b.low for b in snapshot.bars]
+        opens = [b.open for b in snapshot.bars]
+        volumes = [b.volume for b in snapshot.bars]
+
+        if len(closes) < 80:
+            return None
+
+        ma25_list = sma(closes, 25)
+        ma75_list = sma(closes, 75)
+        sma25_now = ma25_list[-1]
+        sma75_now = ma75_list[-1]
+
+        if sma25_now is None or sma75_now is None:
+            return None
+
+        close = closes[-1]
+        open_ = opens[-1]
+        low = lows[-1]
+        volume = volumes[-1]
+        avg_volume20 = sum(volumes[-20:]) / 20
+        volume_ratio = safe_div(volume, avg_volume20)
+
+        recent_high, recent_low = pick_recent_high_low_from_bars(snapshot.bars, lookback=10)
+        dynamic_score = calc_dynamic_score_from_snapshot(snapshot)
+
+        is_uptrend = close > sma25_now and sma25_now > sma75_now
+        bullish_today = close > open_
+        near_recent_high = close >= recent_high * 0.975
+        near_sma25 = safe_div(abs(close - sma25_now), close) <= 0.03
+        touched_ma25 = low <= sma25_now * 1.01
+        strong_volume = volume_ratio >= 1.2
+
+        positives: List[str] = []
+        negatives: List[str] = []
+
+        if is_uptrend:
+            positives.append("上昇トレンド継続")
+        else:
+            negatives.append("トレンド弱い")
+
+        if bullish_today:
+            positives.append("当日陽線")
+        else:
+            negatives.append("当日陰線")
+
+        if strong_volume:
+            positives.append(f"出来高倍率 {round(volume_ratio, 2)}")
+        else:
+            negatives.append(f"出来高弱め {round(volume_ratio, 2)}")
+
+        if near_recent_high:
+            positives.append("高値圏にかなり接近")
+        if near_sma25:
+            positives.append("25日線近辺")
+        if touched_ma25 and bullish_today:
+            positives.append("25日線タッチ後の戻し")
+
+        hint_type = ""
+        trigger_text = ""
+        status = ""
+
+        if is_uptrend and near_recent_high and strong_volume:
+            hint_type = "ブレイク前兆"
+            trigger_text = f"{round(recent_high, 2)}超えで本格化"
+            status = "高値圏で発射準備"
+        elif is_uptrend and near_sma25 and bullish_today:
+            hint_type = "押し目前兆"
+            trigger_text = f"{round(sma25_now, 2)}付近反発継続で候補化"
+            status = "25日線反発待ち"
+        elif is_uptrend and touched_ma25 and not bullish_today:
+            hint_type = "監視継続"
+            trigger_text = "次の陽線確認待ち"
+            status = "押し目形成中"
+        else:
+            return None
+
+        return SignalHint(
+            symbol=snapshot.symbol,
+            name=snapshot.name,
+            status=status,
+            hint_type=hint_type,
+            trigger_text=trigger_text,
+            dynamic_score=dynamic_score,
+            reasons_positive=positives,
+            reasons_negative=negatives,
+        )
+
+
 # ---------- 事前シナリオ ----------
 class PreScenarioEngine:
     def evaluate(self, snapshot: SymbolSnapshot) -> Optional[PreScenario]:
@@ -629,7 +735,6 @@ class PreScenarioEngine:
         if len(closes) < 80:
             return None
 
-        # 米株は弱い上げを減らす
         if snapshot.price_change_pct < 1.0:
             return None
 
@@ -850,9 +955,57 @@ class ReportFormatter:
             f"■注意点\n{negatives}"
         )
 
-    def format_pre_scenario_message(self, scenarios: List[PreScenario], top_n: int = 5) -> str:
+    def format_signal_message(
+        self,
+        hints: List[SignalHint],
+        top_n: int = 5,
+    ) -> List[str]:
+        ranked = sorted(hints, key=lambda x: x.dynamic_score, reverse=True)[:top_n]
+        lines: List[str] = []
+        lines.append(f"【米株 前兆シグナル TOP{len(ranked)}】")
+        lines.append("")
+
+        if not ranked:
+            lines.append("前兆シグナルなし")
+            return lines
+
+        for i, h in enumerate(ranked, start=1):
+            lines.append(f"{i}. {h.symbol} {h.name}")
+            lines.append(f"状況：{h.status}")
+            lines.append(f"型：{h.hint_type}")
+            lines.append(f"トリガー：{h.trigger_text}")
+            lines.append("根拠：")
+            lines.append(format_reason_lines(h.reasons_positive, limit=4))
+            if h.reasons_negative:
+                lines.append("注意：")
+                lines.append(format_reason_lines(h.reasons_negative, limit=2))
+            lines.append("")
+
+        return lines
+
+    def format_pre_scenario_message(
+        self,
+        scenarios: List[PreScenario],
+        hints: List[SignalHint],
+        top_n: int = 5,
+    ) -> str:
+        lines: List[str] = []
+
+        lines.extend(self.format_signal_message(hints, top_n=CONFIG["signal_top_n"]))
+        lines.append("----------------------")
+        lines.append("")
+
         if not scenarios:
-            return "【監視候補】なし\n\n【夜仕込み候補】なし"
+            lines.append("【米株 監視候補 TOP0】")
+            lines.append("")
+            lines.append("候補なし")
+            lines.append("")
+            lines.append("----------------------")
+            lines.append("")
+            lines.append("【米株 夜仕込み候補 TOP0】")
+            lines.append("")
+            lines.append("注文できる候補なし")
+            return "\n".join(lines)
 
         sorted_all = sorted(
             scenarios,
@@ -866,8 +1019,6 @@ class ReportFormatter:
             key=lambda x: x.dynamic_score,
             reverse=True
         )[:top_n]
-
-        lines: List[str] = []
 
         lines.append(f"【米株 監視候補 TOP{len(sorted_all)}】")
         lines.append("")
@@ -989,6 +1140,7 @@ class TradeBot:
         self.market_client = MarketDataClient()
         self.news_client = NewsClient()
         self.rule_engine = RuleEngine()
+        self.signal_hint_engine = SignalHintEngine()
         self.pre_scenario_engine = PreScenarioEngine()
         self.formatter = ReportFormatter()
         self.notifier = LineNotifier(
@@ -1071,18 +1223,26 @@ class TradeBot:
         log("BOT開始: prescenario mode")
         universe = self.market_client.get_all_candidates()
         scenarios: List[PreScenario] = []
+        hints: List[SignalHint] = []
 
         for item in universe:
             try:
                 snapshot = self.build_snapshot(item)
+
+                hint = self.signal_hint_engine.evaluate(snapshot)
+                if hint is not None:
+                    hints.append(hint)
+
                 scenario = self.pre_scenario_engine.evaluate(snapshot)
                 if scenario is not None:
                     scenarios.append(scenario)
+
             except Exception as e:
                 log(f"事前シナリオスキップ: {item.get('symbol', 'UNKNOWN')} / {e}")
 
         message = self.formatter.format_pre_scenario_message(
-            scenarios,
+            scenarios=scenarios,
+            hints=hints,
             top_n=CONFIG["prescenario_top_n"],
         )
         self.notifier.send_text(message)
