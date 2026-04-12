@@ -17,12 +17,10 @@ import yfinance as yf
 # ※ GO通知は廃止
 # ※ 監視候補 / 夜仕込み候補 / 理由見える化 対応版
 # ※ 日本株100株単位対応版
+# ※ 前兆ログ保存対応版
 # ==============================
 
 # ---------- LINE設定 ----------
-# GitHub Secrets に入れる:
-# LINE_CHANNEL_ACCESS_TOKEN
-# LINE_USER_ID
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_USER_ID = os.getenv("LINE_USER_ID", "")
 
@@ -67,63 +65,38 @@ SYMBOL_NAME_MAP = {
 
 # ---------- 設定 ----------
 CONFIG = {
-    "min_volume": 1_000_000,          # 最低出来高
-    "max_candidates": 30,             # 最大候補数
-    "min_score_to_notify": 50,        # 判定用スコア
-    "pullback_ma_tolerance": 0.01,    # 25日線接触許容（1%）
-    "max_distance_from_ma25": 6.0,    # 25日線からの乖離許容（%）
-    "breakout_buffer": 0.002,         # ブレイク判定用
-    "take_profit_pct": 0.03,          # 押し目利確目安
-    "stop_buffer": 0.995,             # 損切りは直近安値の少し下
+    "min_volume": 1_000_000,
+    "max_candidates": 30,
+    "min_score_to_notify": 50,
+    "pullback_ma_tolerance": 0.01,
+    "max_distance_from_ma25": 6.0,
+    "breakout_buffer": 0.002,
+    "take_profit_pct": 0.03,
+    "stop_buffer": 0.995,
 
     # 資金管理
-    "account_size": 100_000,          # 口座資金
-    "risk_per_trade": 0.01,           # 1回の許容損失 1%
-    "max_position_ratio": 0.25,       # 1銘柄に入れる最大資金比率
-    "min_rr": 1.3,                    # 最低RR
-    "max_stop_pct": 0.06,             # 損切り幅6%超は見送り
-    "lot_size_jp": 100,               # 日本株は100株単位
+    "account_size": 100_000,
+    "risk_per_trade": 0.01,
+    "max_position_ratio": 0.25,
+    "min_rr": 1.3,
+    "max_stop_pct": 0.06,
+    "lot_size_jp": 100,
 
     # 事前シナリオ
     "prescenario_top_n": 5,
     "monitor_top_n": 5,
 
     # 夜仕込み用
-    "night_breakout_buffer": 0.002,   # 高値の少し上に逆指値
-    "night_pullback_buffer": 0.002,   # 25日線の少し上に指値
-    "night_rr_target": 2.0,           # 利確RR
+    "night_breakout_buffer": 0.002,
+    "night_pullback_buffer": 0.002,
+    "night_rr_target": 2.0,
 
     "candidate_symbols": [
-        "7203.T",
-        "6758.T",
-        "9984.T",
-        "8306.T",
-        "7974.T",
-        "8035.T",
-        "9432.T",
-        "4063.T",
-        "6954.T",
-        "6861.T",
-        "6501.T",
-        "4578.T",
-        "5401.T",
-        "9101.T",
-        "9104.T",
-        "9501.T",
-        "4755.T",
-        "7201.T",
-        "7733.T",
-        "2802.T",
-        "9983.T",
-        "7267.T",
-        "7011.T",
-        "8058.T",
-        "2914.T",
-        "6762.T",
-        "6098.T",
-        "4385.T",
-        "2413.T",
-        "1570.T",
+        "7203.T", "6758.T", "9984.T", "8306.T", "7974.T", "8035.T", "9432.T",
+        "4063.T", "6954.T", "6861.T", "6501.T", "4578.T", "5401.T", "9101.T",
+        "9104.T", "9501.T", "4755.T", "7201.T", "7733.T", "2802.T", "9983.T",
+        "7267.T", "7011.T", "8058.T", "2914.T", "6762.T", "6098.T", "4385.T",
+        "2413.T", "1570.T",
     ],
 }
 
@@ -184,31 +157,18 @@ def calc_position_size(entry: float, stop: float) -> Tuple[int, float]:
         return 0, 0.0
 
     lot_size = CONFIG["lot_size_jp"]
-
-    # 最低1単元の必要資金
     min_order_cost = entry * lot_size
-
-    # 1銘柄に使ってよい最大資金
     max_cash_for_position = CONFIG["account_size"] * CONFIG["max_position_ratio"]
 
-    # そもそも1単元買えない
     if min_order_cost > CONFIG["account_size"]:
         return 0, risk_amount
 
-    # 1銘柄上限に引っかかる
     if min_order_cost > max_cash_for_position:
         return 0, risk_amount
 
-    # リスク許容から何株持てるか
     raw_size_by_risk = risk_amount / risk_per_share
-
-    # 資金上限から何株持てるか
     raw_size_by_cash = max_cash_for_position / entry
-
-    # 小さい方を採用
     max_shares = min(raw_size_by_risk, raw_size_by_cash)
-
-    # 100株単位に切り下げ
     size = int(max_shares // lot_size) * lot_size
 
     return max(size, 0), risk_amount
@@ -315,6 +275,18 @@ class RuleResult:
     rr: float = 0.0
     position_size: int = 0
     risk_amount: float = 0.0
+
+
+@dataclass
+class SignalHint:
+    symbol: str
+    name: str
+    status: str
+    hint_type: str
+    trigger_text: str
+    dynamic_score: float
+    reasons_positive: List[str] = field(default_factory=list)
+    reasons_negative: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -434,10 +406,8 @@ def get_real_bars(ticker: str, period: str = "6mo") -> List[PriceBar]:
             continue
 
         values = [o, h, l, c, v]
-
         if any(math.isnan(x) for x in values):
             continue
-
         if c <= 0 or h <= 0 or l <= 0:
             continue
 
@@ -597,13 +567,11 @@ class RuleEngine:
             entry_price = round(latest_close, 2)
             stop_price = round(recent_low * CONFIG["stop_buffer"], 2)
             take_profit_price = round(entry_price * (1 + CONFIG["take_profit_pct"]), 2)
-
         elif is_breakout_ready:
             setup_type = "breakout"
             entry_price = round(latest_close, 2)
             stop_price = round(recent_low * CONFIG["stop_buffer"], 2)
             take_profit_price = round(entry_price + (entry_price - stop_price) * 2.0, 2)
-
         else:
             negatives.append("押し目/ブレイクの形が未完成")
 
@@ -613,7 +581,6 @@ class RuleEngine:
 
         if entry_price > 0 and stop_price > 0 and take_profit_price > 0:
             stop_pct = safe_div((entry_price - stop_price), entry_price)
-
             if stop_pct <= CONFIG["max_stop_pct"]:
                 rr = calc_rr(entry_price, stop_price, take_profit_price)
                 position_size, risk_amount = calc_position_size(entry_price, stop_price)
@@ -638,13 +605,11 @@ class RuleEngine:
             stop_idea = f"{stop_price:.2f}円割れで損切り"
             take_profit_idea = f"{take_profit_price:.2f}円付近で利確候補"
             verdict = "押し目監視"
-
         elif setup_type == "breakout":
             entry_idea = f"ブレイク候補 / {entry_price:.2f}円付近"
             stop_idea = f"{stop_price:.2f}円割れで損切り"
             take_profit_idea = f"{take_profit_price:.2f}円付近で利確候補"
             verdict = "ブレイク監視"
-
         else:
             entry_idea = "見送り"
             stop_idea = "見送り"
@@ -671,6 +636,99 @@ class RuleEngine:
         )
 
 
+# ---------- 前兆シグナル ----------
+class SignalHintEngine:
+    def evaluate(self, snapshot: SymbolSnapshot) -> Optional[SignalHint]:
+        closes = [b.close for b in snapshot.bars]
+        highs = [b.high for b in snapshot.bars]
+        lows = [b.low for b in snapshot.bars]
+        opens = [b.open for b in snapshot.bars]
+        volumes = [b.volume for b in snapshot.bars]
+
+        if len(closes) < 80:
+            return None
+
+        ma25_list = sma(closes, 25)
+        ma75_list = sma(closes, 75)
+        sma25_now = ma25_list[-1]
+        sma75_now = ma75_list[-1]
+
+        if sma25_now is None or sma75_now is None:
+            return None
+
+        close = closes[-1]
+        open_ = opens[-1]
+        low = lows[-1]
+        volume = volumes[-1]
+        avg_volume20 = sum(volumes[-20:]) / 20
+
+        recent_high, _ = pick_recent_high_low_from_bars(snapshot.bars, lookback=10)
+        dynamic_score = calc_dynamic_score_from_snapshot(snapshot)
+
+        volume_ratio = safe_div(volume, avg_volume20)
+        is_uptrend = close > sma25_now and sma25_now > sma75_now
+        bullish_today = close > open_
+        near_recent_high = close >= recent_high * 0.975
+        near_sma25 = safe_div(abs(close - sma25_now), close) <= 0.03
+        touched_ma25 = low <= sma25_now * 1.01
+        strong_volume = volume_ratio >= 1.1
+
+        positives: List[str] = []
+        negatives: List[str] = []
+
+        if is_uptrend:
+            positives.append("上昇トレンド継続")
+        else:
+            negatives.append("トレンド弱い")
+
+        if bullish_today:
+            positives.append("当日陽線")
+        else:
+            negatives.append("当日陰線")
+
+        if strong_volume:
+            positives.append(f"出来高倍率 {round(volume_ratio, 2)}")
+        else:
+            negatives.append(f"出来高弱め {round(volume_ratio, 2)}")
+
+        if near_recent_high:
+            positives.append("高値圏にかなり接近")
+        if near_sma25:
+            positives.append("25日線近辺")
+        if touched_ma25 and bullish_today:
+            positives.append("25日線タッチ後の戻し")
+
+        hint_type = ""
+        trigger_text = ""
+        status = ""
+
+        if is_uptrend and near_recent_high and strong_volume:
+            hint_type = "ブレイク前兆"
+            trigger_text = f"{round(recent_high, 1)}超えで候補化"
+            status = "高値圏で発射準備"
+        elif is_uptrend and near_sma25 and bullish_today:
+            hint_type = "押し目前兆"
+            trigger_text = f"{round(sma25_now, 1)}付近反発継続で候補化"
+            status = "25日線反発待ち"
+        elif is_uptrend and touched_ma25 and not bullish_today:
+            hint_type = "監視継続"
+            trigger_text = "次の陽線確認待ち"
+            status = "押し目形成中"
+        else:
+            return None
+
+        return SignalHint(
+            symbol=snapshot.symbol,
+            name=snapshot.name,
+            status=status,
+            hint_type=hint_type,
+            trigger_text=trigger_text,
+            dynamic_score=dynamic_score,
+            reasons_positive=positives,
+            reasons_negative=negatives,
+        )
+
+
 # ---------- 事前シナリオ ----------
 class PreScenarioEngine:
     def evaluate(self, snapshot: SymbolSnapshot) -> Optional[PreScenario]:
@@ -691,7 +749,6 @@ class PreScenarioEngine:
 
         if sma25_now is None or sma75_now is None:
             return None
-
         if isinstance(sma25_now, float) and math.isnan(sma25_now):
             return None
         if isinstance(sma75_now, float) and math.isnan(sma75_now):
@@ -882,50 +939,16 @@ class PreScenarioEngine:
 
 # ---------- レポート整形 ----------
 class ReportFormatter:
-    def format_line_message(self, snapshot: SymbolSnapshot, result: RuleResult) -> str:
-        positives = format_reason_lines(result.reasons_positive)
-        negatives = format_reason_lines(result.reasons_negative)
-
-        return (
-            f"【トレードBOT通知】\n"
-            f"銘柄: {snapshot.symbol} / {snapshot.name}\n"
-            f"現在値: {snapshot.current_price:.2f}円\n"
-            f"前日比: {snapshot.price_change_pct:.2f}%\n"
-            f"出来高: {snapshot.volume:,}株\n\n"
-            f"スコア: {result.score}\n"
-            f"型: {result.setup_type}\n"
-            f"判定: {result.verdict}\n\n"
-            f"■売買プラン\n"
-            f"エントリー: {result.entry_price:.2f}円\n"
-            f"損切り: {result.stop_price:.2f}円\n"
-            f"利確: {result.take_profit_price:.2f}円\n"
-            f"RR: {result.rr:.2f}\n"
-            f"ロット: {result.position_size}株\n"
-            f"許容損失: {result.risk_amount:.0f}円\n\n"
-            f"■プラス材料\n{positives}\n\n"
-            f"■注意点\n{negatives}"
-        )
-
     def format_pre_scenario_message(self, scenarios: List[PreScenario], top_n: int = 5) -> str:
         if not scenarios:
             return "【監視候補】なし\n\n【夜仕込み候補】なし"
 
-        sorted_all = sorted(
-            scenarios,
-            key=lambda x: x.dynamic_score,
-            reverse=True
-        )[:CONFIG["monitor_top_n"]]
-
+        sorted_all = sorted(scenarios, key=lambda x: x.dynamic_score, reverse=True)[:CONFIG["monitor_top_n"]]
         orderable = [s for s in scenarios if s.order_ready]
-        sorted_orderable = sorted(
-            orderable,
-            key=lambda x: x.dynamic_score,
-            reverse=True
-        )[:top_n]
+        sorted_orderable = sorted(orderable, key=lambda x: x.dynamic_score, reverse=True)[:top_n]
 
         lines: List[str] = []
 
-        # ===== 監視候補 =====
         lines.append(f"【監視候補 TOP{len(sorted_all)}】")
         lines.append("")
 
@@ -933,9 +956,7 @@ class ReportFormatter:
             lines.append(f"{i}. {s.symbol} {s.name}")
             lines.append(f"状況：{s.status}")
             lines.append(f"型：{s.scenario_type}")
-            lines.append(
-                f"監視：高値 {s.recent_high} / 安値 {s.recent_low} / 25日線 {s.sma25} / 75日線 {s.sma75}"
-            )
+            lines.append(f"監視：高値 {s.recent_high} / 安値 {s.recent_low} / 25日線 {s.sma25} / 75日線 {s.sma75}")
             lines.append("監視理由：")
             lines.append(format_reason_lines(s.reasons_positive, limit=6))
             lines.append("注意：")
@@ -944,8 +965,6 @@ class ReportFormatter:
 
         lines.append("----------------------")
         lines.append("")
-
-        # ===== 夜仕込み候補 =====
         lines.append(f"【夜仕込み候補 TOP{len(sorted_orderable)}】")
         lines.append("")
 
@@ -1001,6 +1020,21 @@ class ReportFormatter:
             "rule_result": asdict(result),
         }
 
+    def format_signal_log_json(self, snapshot: SymbolSnapshot, hint: SignalHint) -> Dict[str, Any]:
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "snapshot": {
+                "symbol": snapshot.symbol,
+                "name": snapshot.name,
+                "current_price": snapshot.current_price,
+                "prev_close": snapshot.prev_close,
+                "volume": snapshot.volume,
+                "price_change_pct": snapshot.price_change_pct,
+                "news_count": len(snapshot.news),
+            },
+            "signal_hint": asdict(hint),
+        }
+
 
 # ---------- LINE通知 ----------
 class LineNotifier:
@@ -1034,13 +1068,22 @@ class LineNotifier:
 
 # ---------- 保存 ----------
 class LocalStorage:
-    def __init__(self, base_dir: str = "logs"):
+    def __init__(self, base_dir: str = "logs", signal_dir: str = "logs_signals"):
         self.base_dir = base_dir
+        self.signal_dir = signal_dir
         os.makedirs(self.base_dir, exist_ok=True)
+        os.makedirs(self.signal_dir, exist_ok=True)
 
     def save_result(self, symbol: str, payload: Dict[str, Any]) -> str:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = os.path.join(self.base_dir, f"{timestamp}_{symbol.replace('.', '_')}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        return path
+
+    def save_signal(self, symbol: str, payload: Dict[str, Any]) -> str:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(self.signal_dir, f"{timestamp}_{symbol.replace('.', '_')}.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         return path
@@ -1052,6 +1095,7 @@ class TradeBot:
         self.market_client = MarketDataClient()
         self.news_client = NewsClient()
         self.rule_engine = RuleEngine()
+        self.signal_hint_engine = SignalHintEngine()
         self.pre_scenario_engine = PreScenarioEngine()
         self.formatter = ReportFormatter()
         self.notifier = LineNotifier(
@@ -1107,22 +1151,16 @@ class TradeBot:
                     go_match_count += 1
                     log(
                         f"GO条件一致（LINE送信なし）: {snapshot.symbol} / "
-                        f"score={result.score} / "
-                        f"setup={result.setup_type} / "
-                        f"entry={result.entry_price:.2f} / "
-                        f"stop={result.stop_price:.2f} / "
-                        f"take={result.take_profit_price:.2f} / "
-                        f"rr={result.rr:.2f} / "
+                        f"score={result.score} / setup={result.setup_type} / "
+                        f"entry={result.entry_price:.2f} / stop={result.stop_price:.2f} / "
+                        f"take={result.take_profit_price:.2f} / rr={result.rr:.2f} / "
                         f"size={result.position_size}"
                     )
                 else:
                     log(
-                        f"通知見送り: {snapshot.symbol} / "
-                        f"score={result.score} / "
-                        f"setup={result.setup_type} / "
-                        f"rr={result.rr:.2f} / "
-                        f"size={result.position_size} / "
-                        f"negatives={result.reasons_negative}"
+                        f"通知見送り: {snapshot.symbol} / score={result.score} / "
+                        f"setup={result.setup_type} / rr={result.rr:.2f} / "
+                        f"size={result.position_size} / negatives={result.reasons_negative}"
                     )
 
             except Exception as e:
@@ -1138,9 +1176,17 @@ class TradeBot:
         for item in universe:
             try:
                 snapshot = self.build_snapshot(item)
+
+                hint = self.signal_hint_engine.evaluate(snapshot)
+                if hint is not None:
+                    signal_payload = self.formatter.format_signal_log_json(snapshot, hint)
+                    saved_signal_path = self.storage.save_signal(snapshot.symbol, signal_payload)
+                    log(f"前兆ログ保存: {saved_signal_path}")
+
                 scenario = self.pre_scenario_engine.evaluate(snapshot)
                 if scenario is not None:
                     scenarios.append(scenario)
+
             except Exception as e:
                 log(f"事前シナリオスキップ: {item.get('symbol', 'UNKNOWN')} / {e}")
 
@@ -1160,7 +1206,6 @@ class TradeBot:
             raise ValueError(f"不明なRUN_MODE: {RUN_MODE}")
 
 
-# ---------- 実行 ----------
 if __name__ == "__main__":
     bot = TradeBot()
     bot.run()
