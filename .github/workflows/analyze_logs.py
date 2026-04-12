@@ -1,0 +1,31 @@
+name: Analyze Logs US
+
+on:
+  schedule:
+    - cron: "30 20 * * 2-6"
+  workflow_dispatch:
+
+jobs:
+  analyze-us:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance requests pandas
+
+      - name: Run US log analysis
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          ANALYZE_TARGET: us
+        run: python analyze_logs.py
